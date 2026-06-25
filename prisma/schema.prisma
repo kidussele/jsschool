@@ -1,0 +1,210 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id              String           @id @default(cuid())
+  email           String           @unique
+  name            String
+  avatar          String?
+  bio             String?
+  xp              Int              @default(0)
+  streak          Int              @default(0)
+  lastActiveAt    DateTime?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  progress        UserProgress[]
+  quizAttempts    QuizAttempt[]
+  certificates    Certificate[]
+  achievements    UserAchievement[]
+  discussionPosts DiscussionPost[]
+  codeSnippets    CodeSnippet[]
+  leaderboard     Leaderboard?
+}
+
+model UserProgress {
+  id        String   @id @default(cuid())
+  userId    String
+  lessonId  String
+  status    String   @default("not_started") // not_started, in_progress, completed
+  xpEarned  Int      @default(0)
+  completedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+  lesson    Lesson   @relation(fields: [lessonId], references: [id])
+
+  @@unique([userId, lessonId])
+}
+
+model Level {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  order       Int
+  color       String
+  icon        String
+  modules     Module[]
+  createdAt   DateTime @default(now())
+}
+
+model Module {
+  id       String  @id @default(cuid())
+  title    String
+  description String
+  order    Int
+  levelId  String
+  lessons  Lesson[]
+  level    Level   @relation(fields: [levelId], references: [id])
+
+  @@unique([levelId, order])
+}
+
+model Lesson {
+  id          String   @id @default(cuid())
+  title       String
+  content     String   // markdown content
+  codeExample String?
+  order       Int
+  moduleId    String
+  module      Module   @relation(fields: [moduleId], references: [id])
+  progress    UserProgress[]
+  createdAt   DateTime @default(now())
+
+  @@unique([moduleId, order])
+}
+
+model Quiz {
+  id          String          @id @default(cuid())
+  title       String
+  description String
+  difficulty  String          @default("easy") // easy, medium, hard
+  moduleId    String?
+  questions   QuizQuestion[]
+  attempts    QuizAttempt[]
+  createdAt   DateTime        @default(now())
+}
+
+model QuizQuestion {
+  id          String   @id @default(cuid())
+  quizId      String
+  question    String
+  type        String   @default("multiple_choice") // multiple_choice, code_challenge, fill_blank
+  options     String?  // JSON array of options
+  correctAnswer String
+  explanation  String?
+  codeSnippet  String?
+  order       Int
+  quiz        Quiz     @relation(fields: [quizId], references: [id])
+  points      Int      @default(10)
+}
+
+model QuizAttempt {
+  id           String   @id @default(cuid())
+  userId       String
+  quizId       String
+  score        Int
+  totalPoints  Int
+  correctCount Int
+  totalQuestions Int
+  answers      String   // JSON
+  completedAt  DateTime @default(now())
+  user         User     @relation(fields: [userId], references: [id])
+  quiz         Quiz     @relation(fields: [quizId], references: [id])
+}
+
+model Certificate {
+  id            String   @id @default(cuid())
+  userId        String
+  courseName    String
+  certificateId String   @unique
+  issuedAt      DateTime @default(now())
+  user          User     @relation(fields: [userId], references: [id])
+}
+
+model Achievement {
+  id          String            @id @default(cuid())
+  name        String
+  description String
+  icon        String
+  xpReward    Int
+  condition   String           // JSON condition for earning
+  users       UserAchievement[]
+  createdAt   DateTime         @default(now())
+}
+
+model UserAchievement {
+  id            String     @id @default(cuid())
+  userId        String
+  achievementId String
+  earnedAt      DateTime   @default(now())
+  user          User       @relation(fields: [userId], references: [id])
+  achievement   Achievement @relation(fields: [achievementId], references: [id])
+
+  @@unique([userId, achievementId])
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  difficulty  String
+  category    String
+  imageUrl    String?
+  duration    String
+  skills      String   // JSON array of skills
+  steps       String   // JSON array of steps
+  createdAt   DateTime @default(now())
+}
+
+model DiscussionPost {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  content   String
+  tags      String?  // JSON
+  likes     Int      @default(0)
+  replies   Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model CodeSnippet {
+  id        String   @id @default(cuid())
+  userId    String
+  title     String
+  html      String   @default("")
+  css       String   @default("")
+  javascript String  @default("")
+  isPublic  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+model DailyChallenge {
+  id          String   @id @default(cuid())
+  title       String
+  description String
+  difficulty  String
+  codeTemplate String
+  testCases   String   // JSON
+  solution    String
+  xpReward    Int      @default(50)
+  date        String   // YYYY-MM-DD
+  createdAt   DateTime @default(now())
+}
+
+model Leaderboard {
+  id    String @id @default(cuid())
+  userId String @unique
+  xp    Int
+  rank  Int
+  user  User  @relation(fields: [userId], references: [id])
+}
