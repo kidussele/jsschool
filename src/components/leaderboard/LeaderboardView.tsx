@@ -4,32 +4,138 @@ import { motion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useAppStore } from "@/lib/store";
+import { useState, useEffect, useCallback } from "react";
 import {
-  Trophy, Medal, Zap, Crown, Star, TrendingUp,
+  Trophy,
+  Crown,
+  Medal,
+  Zap,
+  Flame,
+  Users,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-const leaderboardData = [
-  { rank: 1, name: "Alex Developer", xp: 12450, level: 25, streak: 42, initials: "AD", badge: "bg-yellow-500/10 text-yellow-500" },
-  { rank: 2, name: "Sarah Chen", xp: 11200, level: 23, streak: 38, initials: "SC", badge: "bg-slate-400/10 text-slate-400" },
-  { rank: 3, name: "Marcus Johnson", xp: 10800, level: 22, streak: 35, initials: "MJ", badge: "bg-amber-600/10 text-amber-600" },
-  { rank: 4, name: "Priya Patel", xp: 9650, level: 20, streak: 28, initials: "PP", badge: "" },
-  { rank: 5, name: "Jordan Rivera", xp: 8900, level: 18, streak: 31, initials: "JR", badge: "" },
-  { rank: 6, name: "Emma Liu", xp: 8200, level: 17, streak: 24, initials: "EL", badge: "" },
-  { rank: 7, name: "Kai Nakamura", xp: 7600, level: 16, streak: 20, initials: "KN", badge: "" },
-  { rank: 8, name: "Olivia Brown", xp: 7100, level: 15, streak: 19, initials: "OB", badge: "" },
-  { rank: 9, name: "Liam Wilson", xp: 6500, level: 14, streak: 15, initials: "LW", badge: "" },
-  { rank: 10, name: "Zara Ahmed", xp: 5900, level: 12, streak: 12, initials: "ZA", badge: "" },
-  { rank: 11, name: "Noah Garcia", xp: 5300, level: 11, streak: 10, initials: "NG", badge: "" },
-  { rank: 12, name: "Mia Taylor", xp: 4800, level: 10, streak: 9, initials: "MT", badge: "" },
-  { rank: 13, name: "Chris Lee", xp: 4200, level: 9, streak: 7, initials: "CL", badge: "" },
-  { rank: 14, name: "Ava Martinez", xp: 3600, level: 8, streak: 5, initials: "AM", badge: "" },
-  { rank: 15, name: "James Kim", xp: 3000, level: 7, streak: 4, initials: "JK", badge: "" },
+interface LeaderboardEntry {
+  rank: number;
+  id: string;
+  name: string;
+  avatar?: string | null;
+  xp: number;
+  streak: number;
+  coins: number;
+}
+
+const topColors = [
+  { border: "border-yellow-500", bg: "bg-yellow-500/10", text: "text-yellow-500", gradient: "from-yellow-500/20", medal: "#FFD700" },
+  { border: "border-slate-400", bg: "bg-slate-400/10", text: "text-slate-400", gradient: "from-slate-400/20", medal: "#C0C0C0" },
+  { border: "border-[#CD7F32]", bg: "bg-[#CD7F32]/10", text: "text-[#CD7F32]", gradient: "from-[#CD7F32]/20", medal: "#CD7F32" },
 ];
 
 export function LeaderboardView() {
+  const { user } = useAppStore();
+  const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchLeaderboard = useCallback(async () => {
+    setLoading(true);
+    try {
+      const res = await fetch("/api/leaderboard?limit=50");
+      const data = await res.json();
+      if (data.leaderboard) {
+        setEntries(data.leaderboard);
+      }
+    } catch {
+      // silent fail
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchLeaderboard();
+  }, [fetchLeaderboard]);
+
+  const top3 = entries.slice(0, 3);
+  const rest = entries.slice(3);
+
+  const getInitials = (name: string) =>
+    name
+      .split(" ")
+      .map((n) => n[0])
+      .join("")
+      .slice(0, 2)
+      .toUpperCase();
+
+  if (loading) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-10 w-10 rounded-xl" />
+            <div className="space-y-1.5">
+              <Skeleton className="h-7 w-40" />
+              <Skeleton className="h-4 w-56" />
+            </div>
+          </div>
+        </motion.div>
+        {/* Podium skeleton */}
+        <div className="flex items-end justify-center gap-3 sm:gap-5 mb-8 px-4">
+          {[120, 160, 100].map((h, i) => (
+            <div key={i} className="text-center flex-1 max-w-[160px]">
+              <Skeleton className="h-14 w-14 sm:h-16 sm:w-16 mx-auto rounded-full mb-3" />
+              <Skeleton className="h-4 w-24 mx-auto mb-1" />
+              <Skeleton className="h-3 w-16 mx-auto mb-3" />
+              <Skeleton className="h-24 mx-auto rounded-t-xl w-full" style={{ height: h }} />
+            </div>
+          ))}
+        </div>
+        {/* List skeleton */}
+        <Card>
+          <div className="divide-y">
+            {Array.from({ length: 10 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-3 px-4 sm:px-5 py-3.5">
+                <Skeleton className="w-6 h-5" />
+                <Skeleton className="h-9 w-9 rounded-full" />
+                <div className="flex-1 space-y-1.5">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-24" />
+                </div>
+                <Skeleton className="h-4 w-16" />
+              </div>
+            ))}
+          </div>
+        </Card>
+      </div>
+    );
+  }
+
+  if (entries.length === 0) {
+    return (
+      <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+        <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
+          <div className="flex items-center gap-3">
+            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-js-yellow/10">
+              <Trophy className="h-5 w-5 text-js-yellow" />
+            </div>
+            <div>
+              <h1 className="text-2xl sm:text-3xl font-extrabold">Leaderboard</h1>
+              <p className="text-sm text-muted-foreground">Top JavaScript Heroes ranked by XP</p>
+            </div>
+          </div>
+        </motion.div>
+        <div className="text-center py-16">
+          <Users className="h-12 w-12 text-muted-foreground/30 mx-auto mb-4" />
+          <p className="text-muted-foreground">No leaderboard entries yet. Be the first to earn XP!</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-4xl px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+      {/* Header */}
       <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} className="mb-8">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-js-yellow/10">
@@ -43,75 +149,125 @@ export function LeaderboardView() {
       </motion.div>
 
       {/* Top 3 Podium */}
-      <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="flex items-end justify-center gap-3 sm:gap-5 mb-8 px-4">
-        {/* 2nd Place */}
-        <div className="text-center flex-1 max-w-[160px]">
-          <div className="relative inline-block mb-3">
-            <Avatar className="h-14 w-14 sm:h-16 sm:w-16 mx-auto border-2 border-slate-400">
-              <AvatarFallback className="bg-slate-400/10 text-slate-400 font-bold">{leaderboardData[1].initials}</AvatarFallback>
-            </Avatar>
-            <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-slate-400 text-white flex items-center justify-center text-[10px] font-bold shadow">2</div>
-          </div>
-          <div className="font-bold text-sm truncate">{leaderboardData[1].name}</div>
-          <div className="text-xs text-muted-foreground">{leaderboardData[1].xp.toLocaleString()} XP</div>
-          <div className="h-20 sm:h-24 bg-gradient-to-t from-slate-400/20 to-transparent rounded-t-xl mt-3" />
-        </div>
-
-        {/* 1st Place */}
-        <div className="text-center flex-1 max-w-[180px]">
-          <div className="relative inline-block mb-3">
-            <div className="absolute -top-6 left-1/2 -translate-x-1/2">
-              <Crown className="h-6 w-6 text-yellow-500" />
+      {top3.length >= 3 && (
+        <motion.div
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.1 }}
+          className="flex items-end justify-center gap-3 sm:gap-5 mb-8 px-4"
+        >
+          {/* 2nd Place */}
+          <div className="text-center flex-1 max-w-[160px]">
+            <div className="relative inline-block mb-3">
+              <Avatar className="h-14 w-14 sm:h-16 sm:w-16 mx-auto border-2" style={{ borderColor: topColors[1].medal }}>
+                <AvatarFallback className="font-bold" style={{ backgroundColor: `${topColors[1].medal}15`, color: topColors[1].medal }}>
+                  {getInitials(top3[1].name)}
+                </AvatarFallback>
+              </Avatar>
+              <div
+                className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold shadow text-white"
+                style={{ backgroundColor: topColors[1].medal }}
+              >
+                2
+              </div>
             </div>
-            <Avatar className="h-18 w-18 sm:h-20 sm:w-20 mx-auto border-2 border-yellow-500 shadow-lg shadow-yellow-500/20">
-              <AvatarFallback className="bg-yellow-500/10 text-yellow-500 font-bold text-lg">{leaderboardData[0].initials}</AvatarFallback>
-            </Avatar>
-            <div className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full bg-yellow-500 text-white flex items-center justify-center text-xs font-bold shadow-lg">1</div>
+            <div className="font-bold text-sm truncate">{top3[1].name}</div>
+            <div className="text-xs text-muted-foreground">{top3[1].xp.toLocaleString()} XP</div>
+            <div className="h-20 sm:h-24 rounded-t-xl mt-3" style={{ background: `linear-gradient(to top, ${topColors[1].medal}30, transparent)` }} />
           </div>
-          <div className="font-bold text-base truncate">{leaderboardData[0].name}</div>
-          <div className="text-sm font-semibold text-yellow-500">{leaderboardData[0].xp.toLocaleString()} XP</div>
-          <div className="h-28 sm:h-32 bg-gradient-to-t from-yellow-500/20 to-transparent rounded-t-xl mt-3" />
-        </div>
 
-        {/* 3rd Place */}
-        <div className="text-center flex-1 max-w-[160px]">
-          <div className="relative inline-block mb-3">
-            <Avatar className="h-14 w-14 sm:h-16 sm:w-16 mx-auto border-2 border-amber-600">
-              <AvatarFallback className="bg-amber-600/10 text-amber-600 font-bold">{leaderboardData[2].initials}</AvatarFallback>
-            </Avatar>
-            <div className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full bg-amber-600 text-white flex items-center justify-center text-[10px] font-bold shadow">3</div>
+          {/* 1st Place */}
+          <div className="text-center flex-1 max-w-[180px]">
+            <div className="relative inline-block mb-3">
+              <div className="absolute -top-6 left-1/2 -translate-x-1/2">
+                <Crown className="h-6 w-6" style={{ color: topColors[0].medal }} />
+              </div>
+              <Avatar className="h-18 w-18 sm:h-20 sm:w-20 mx-auto border-2 shadow-lg" style={{ borderColor: topColors[0].medal, boxShadow: `0 4px 20px ${topColors[0].medal}40` }}>
+                <AvatarFallback className="font-bold text-lg" style={{ backgroundColor: `${topColors[0].medal}15`, color: topColors[0].medal }}>
+                  {getInitials(top3[0].name)}
+                </AvatarFallback>
+              </Avatar>
+              <div
+                className="absolute -bottom-1 -right-1 h-7 w-7 rounded-full flex items-center justify-center text-xs font-bold shadow-lg text-white"
+                style={{ backgroundColor: topColors[0].medal }}
+              >
+                1
+              </div>
+            </div>
+            <div className="font-bold text-base truncate">{top3[0].name}</div>
+            <div className="text-sm font-semibold" style={{ color: topColors[0].medal }}>
+              {top3[0].xp.toLocaleString()} XP
+            </div>
+            <div className="h-28 sm:h-32 rounded-t-xl mt-3" style={{ background: `linear-gradient(to top, ${topColors[0].medal}30, transparent)` }} />
           </div>
-          <div className="font-bold text-sm truncate">{leaderboardData[2].name}</div>
-          <div className="text-xs text-muted-foreground">{leaderboardData[2].xp.toLocaleString()} XP</div>
-          <div className="h-16 sm:h-20 bg-gradient-to-t from-amber-600/20 to-transparent rounded-t-xl mt-3" />
-        </div>
-      </motion.div>
+
+          {/* 3rd Place */}
+          <div className="text-center flex-1 max-w-[160px]">
+            <div className="relative inline-block mb-3">
+              <Avatar className="h-14 w-14 sm:h-16 sm:w-16 mx-auto border-2" style={{ borderColor: topColors[2].medal }}>
+                <AvatarFallback className="font-bold" style={{ backgroundColor: `${topColors[2].medal}15`, color: topColors[2].medal }}>
+                  {getInitials(top3[2].name)}
+                </AvatarFallback>
+              </Avatar>
+              <div
+                className="absolute -bottom-1 -right-1 h-6 w-6 rounded-full flex items-center justify-center text-[10px] font-bold shadow text-white"
+                style={{ backgroundColor: topColors[2].medal }}
+              >
+                3
+              </div>
+            </div>
+            <div className="font-bold text-sm truncate">{top3[2].name}</div>
+            <div className="text-xs text-muted-foreground">{top3[2].xp.toLocaleString()} XP</div>
+            <div className="h-16 sm:h-20 rounded-t-xl mt-3" style={{ background: `linear-gradient(to top, ${topColors[2].medal}30, transparent)` }} />
+          </div>
+        </motion.div>
+      )}
 
       {/* Rest of Leaderboard */}
       <Card>
         <div className="divide-y">
-          {leaderboardData.slice(3).map((user, i) => (
-            <motion.div
-              key={user.rank}
-              initial={{ opacity: 0, x: -10 }}
-              animate={{ opacity: 1, x: 0 }}
-              transition={{ delay: 0.2 + i * 0.03 }}
-              className="flex items-center gap-3 px-4 sm:px-5 py-3.5 hover:bg-muted/30 transition-colors"
-            >
-              <span className="w-8 text-center text-sm font-bold text-muted-foreground">{user.rank}</span>
-              <Avatar className="h-9 w-9">
-                <AvatarFallback className="bg-muted text-xs font-bold">{user.initials}</AvatarFallback>
-              </Avatar>
-              <div className="flex-1 min-w-0">
-                <div className="font-semibold text-sm truncate">{user.name}</div>
-                <div className="text-[11px] text-muted-foreground">Level {user.level} • {user.streak} day streak</div>
-              </div>
-              <div className="text-right">
-                <div className="text-sm font-bold text-js-yellow">{user.xp.toLocaleString()}</div>
-                <div className="text-[10px] text-muted-foreground">XP</div>
-              </div>
-            </motion.div>
-          ))}
+          {rest.map((entry, i) => {
+            const isCurrentUser = user && user.id === entry.id;
+            const lvl = Math.floor(entry.xp / 500) + 1;
+            return (
+              <motion.div
+                key={entry.id}
+                initial={{ opacity: 0, x: -10 }}
+                animate={{ opacity: 1, x: 0 }}
+                transition={{ delay: 0.2 + i * 0.03 }}
+                className={cn(
+                  "flex items-center gap-3 px-4 sm:px-5 py-3.5 transition-colors",
+                  isCurrentUser ? "bg-js-yellow/5" : "hover:bg-muted/30"
+                )}
+              >
+                <span className="w-8 text-center text-sm font-bold text-muted-foreground">
+                  {entry.rank}
+                </span>
+                <Avatar className="h-9 w-9">
+                  <AvatarFallback className="bg-muted text-xs font-bold">
+                    {getInitials(entry.name)}
+                  </AvatarFallback>
+                </Avatar>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-sm truncate">{entry.name}</span>
+                    {isCurrentUser && (
+                      <Badge className="bg-js-yellow/10 text-js-yellow border-js-yellow/20 text-[9px] h-4 px-1.5">
+                        You
+                      </Badge>
+                    )}
+                  </div>
+                  <div className="text-[11px] text-muted-foreground">
+                    Level {lvl} • {entry.streak} day streak
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm font-bold text-js-yellow">{entry.xp.toLocaleString()}</div>
+                  <div className="text-[10px] text-muted-foreground">XP</div>
+                </div>
+              </motion.div>
+            );
+          })}
         </div>
       </Card>
     </div>

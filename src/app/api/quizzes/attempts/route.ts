@@ -1,0 +1,157 @@
+import { NextRequest, NextResponse } from "next/server";
+import { db } from "@/lib/db";
+
+export async function GET(request: NextRequest) {
+  try {
+    const { searchParams } = new URL(request.url);
+    const userId = searchParams.get("userId");
+    const quizId = searchParams.get("quizId");
+
+    if (!userId) {
+      return NextResponse.json(
+        { error: "userId is required" },
+        { status: 400 }
+      );
+    }
+
+    const where: Record<string, unknown> = { userId };
+    if (quizId) where.quizId = quizId;
+
+    const attempts = await db.quizAttempt.findMany({
+      where,
+      orderBy: { completedAt: "desc" },
+      include: {
+        quiz: { select: { id: true, title: true, difficulty: true } },
+      },
+    });
+
+    return NextResponse.json({ attempts });
+  } catch (error) {
+    console.error("Get quiz attempts error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const { userId, quizId, answers, timeTaken } = await request.json();
+
+    if (!userId || !quizId || !answers) {
+      return NextResponse.json(
+        { error: "userId, quizId, and answers are required" },
+        { status: 400 }
+      );
+    }
+
+    const quiz = await db.quiz.findUnique({
+      where: { id: quizId },
+      include: { questions: true },
+    });
+
+    if (!quiz) {
+      return NextResponse.json({ error: "Quiz not found" }, { status: 404 });
+    }
+
+    // Calculate score
+    let correctCount = 0;
+    let totalPoints = 0;
+
+    const sortedQuestions = quiz.questions.sort((a, b) => a.order - b.order);
+
+    for (const question of sortedQuestions) {
+      totalPoints += question.points;
+      const userAnswer = answers[question.id];
+      if (userAnswer !== undefined) {
+        // For multiple_answer, userAnswer is an array
+        if (question.type === "multiple_answer") {
+          const correct = Array.isArray(userAnswer) && JSON.stringify([...userAnswer].sort()) === JSON.stringify(JSON.parse(question.correctAnswer).sort());
+          if (correct) correctCount++;
+        } else {
+          if (String(userAnswer).trim().toLowerCase() === String(question.correctAnswer).trim().toLowerCase()) {
+            correctCount++;
+          }
+        }
+      }
+    }
+
+    const score = sortedQuestions
+      .filter((q, i) => {
+        const userAnswer = answers[q.id];
+        if (q.type === "multiple_answer") {
+          return Array.isArray(userAnswer) && JSON.stringify([...userAnswer].sort()) === JSON.stringify(JSON.parse(q.correctAnswer).sort());
+        }
+        return userAnswer !== undefined && String(userAnswer).trim().toLowerCase() === String(q.correctAnswer).trim().toLowerCase();
+      })
+      .reduce((sum, q) => sum + q.points, 0);
+
+    // Save attempt
+    const attempt = await db.quizAttempt.create({
+      data: {
+        userId,
+        quizId,
+        score,
+        totalPoints,
+        correctCount,
+        totalQuestions: sortedQuestions.length,
+        answers: JSON.stringify(answers),
+        timeTaken: timeTaken || 0,
+      },
+    });
+
+    // Award XP (10 XP per correct answer)
+    const xpEarned = correctCount * 10;
+    if (xpEarned > 0) {
+      await db.user.update({
+        where: { id: userId },
+        data: { xp: { increment: xpEarned } },
+      });
+    }
+
+    // Create notification
+    const percentage = totalPoints > 0 ? Math.round((score / totalPoints) * 100) : 0;
+    await db.notification.create({
+      data: {
+        userId,
+        type: "quiz_graded",
+        title: "Quiz Completed!",
+        message: `You scored ${percentage}% on "${quiz.title}" — +${xpEarned} XP`,
+      },
+    });
+
+    // Log activity
+    await db.activityLog.create({
+      data: {
+        userId,
+        action: "quiz_taken",
+        details: JSON.stringify({ quizId, score, percentage, xpEarned }),
+      },
+    });
+
+    // Check certificate eligibility — if user scores 100%, check if all quizzes for a level are passed
+    let certificateEligible = false;
+    if (percentage === 100) {
+      certificateEligible = true;
+    }
+
+    return NextResponse.json({
+      attempt,
+      score,
+      totalPoints,
+      correctCount,
+      totalQuestions: sortedQuestions.length,
+      percentage,
+      xpEarned,
+      certificateEligible,
+      message: "Quiz submitted successfully",
+    });
+  } catch (error) {
+    console.error("Submit quiz error:", error);
+    return NextResponse.json(
+      { error: "Internal server error" },
+      { status: 500 }
+    );
+  }
+}

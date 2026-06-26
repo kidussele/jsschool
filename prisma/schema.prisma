@@ -11,120 +11,129 @@ model User {
   id              String           @id @default(cuid())
   email           String           @unique
   name            String
+  password        String
   avatar          String?
   bio             String?
+  role            String           @default("student") // student, admin
+  emailVerified   Boolean          @default(false)
   xp              Int              @default(0)
+  coins           Int              @default(0)
   streak          Int              @default(0)
+  lastLoginDate   String?          // YYYY-MM-DD for streak tracking
   lastActiveAt    DateTime?
+  totalTimeSpent  Int              @default(0) // minutes
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
+
   progress        UserProgress[]
   quizAttempts    QuizAttempt[]
   certificates    Certificate[]
   achievements    UserAchievement[]
   discussionPosts DiscussionPost[]
   codeSnippets    CodeSnippet[]
+  notifications   Notification[]
+  projectSubmissions ProjectSubmission[]
+  challengeSubmissions ChallengeSubmission[]
+  bookmarks       Bookmark[]
+  activityLogs    ActivityLog[]
   leaderboard     Leaderboard?
+  lessonNotes     LessonNote[]
+
+  @@index([email])
+  @@index([xp])
+  @@index([role])
 }
 
 model UserProgress {
+  id          String   @id @default(cuid())
+  userId      String
+  lessonId    String   // matches course-data lesson IDs
+  status      String   @default("not_started") // not_started, in_progress, completed
+  xpEarned    Int      @default(0)
+  timeSpent   Int      @default(0) // seconds
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, lessonId])
+  @@index([userId])
+}
+
+model LessonNote {
   id        String   @id @default(cuid())
   userId    String
   lessonId  String
-  status    String   @default("not_started") // not_started, in_progress, completed
-  xpEarned  Int      @default(0)
-  completedAt DateTime?
+  content   String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id])
-  lesson    Lesson   @relation(fields: [lessonId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, lessonId])
+  @@index([userId])
 }
 
-model Level {
-  id          String   @id @default(cuid())
-  title       String
-  description String
-  order       Int
-  color       String
-  icon        String
-  modules     Module[]
-  createdAt   DateTime @default(now())
-}
+model Bookmark {
+  id        String   @id @default(cuid())
+  userId    String
+  lessonId  String?
+  postId    String?
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-model Module {
-  id       String  @id @default(cuid())
-  title    String
-  description String
-  order    Int
-  levelId  String
-  lessons  Lesson[]
-  level    Level   @relation(fields: [levelId], references: [id])
-
-  @@unique([levelId, order])
-}
-
-model Lesson {
-  id          String   @id @default(cuid())
-  title       String
-  content     String   // markdown content
-  codeExample String?
-  order       Int
-  moduleId    String
-  module      Module   @relation(fields: [moduleId], references: [id])
-  progress    UserProgress[]
-  createdAt   DateTime @default(now())
-
-  @@unique([moduleId, order])
+  @@index([userId])
 }
 
 model Quiz {
   id          String          @id @default(cuid())
   title       String
   description String
-  difficulty  String          @default("easy") // easy, medium, hard
+  difficulty  String          @default("easy")
   moduleId    String?
+  createdAt   DateTime        @default(now())
   questions   QuizQuestion[]
   attempts    QuizAttempt[]
-  createdAt   DateTime        @default(now())
 }
 
 model QuizQuestion {
-  id          String   @id @default(cuid())
-  quizId      String
-  question    String
-  type        String   @default("multiple_choice") // multiple_choice, code_challenge, fill_blank
-  options     String?  // JSON array of options
+  id            String   @id @default(cuid())
+  quizId        String
+  question      String
+  type          String   @default("multiple_choice") // multiple_choice, fill_blank, code_challenge, multiple_answer
+  options       String?  // JSON array of options
   correctAnswer String
-  explanation  String?
-  codeSnippet  String?
-  order       Int
-  quiz        Quiz     @relation(fields: [quizId], references: [id])
-  points      Int      @default(10)
+  explanation   String?
+  codeSnippet   String?
+  order         Int
+  points        Int      @default(10)
+  quiz          Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
 }
 
 model QuizAttempt {
-  id           String   @id @default(cuid())
-  userId       String
-  quizId       String
-  score        Int
-  totalPoints  Int
-  correctCount Int
+  id             String   @id @default(cuid())
+  userId         String
+  quizId         String
+  score          Int
+  totalPoints    Int
+  correctCount   Int
   totalQuestions Int
-  answers      String   // JSON
-  completedAt  DateTime @default(now())
-  user         User     @relation(fields: [userId], references: [id])
-  quiz         Quiz     @relation(fields: [quizId], references: [id])
+  answers        String   // JSON
+  timeTaken      Int      @default(0) // seconds
+  completedAt    DateTime @default(now())
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  quiz           Quiz     @relation(fields: [quizId], references: [id], onDelete: Cascade)
 }
 
 model Certificate {
   id            String   @id @default(cuid())
   userId        String
   courseName    String
+  levelName     String
   certificateId String   @unique
   issuedAt      DateTime @default(now())
-  user          User     @relation(fields: [userId], references: [id])
+  user          User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model Achievement {
@@ -133,18 +142,18 @@ model Achievement {
   description String
   icon        String
   xpReward    Int
-  condition   String           // JSON condition for earning
+  condition   String            // JSON condition
   users       UserAchievement[]
-  createdAt   DateTime         @default(now())
+  createdAt   DateTime          @default(now())
 }
 
 model UserAchievement {
-  id            String     @id @default(cuid())
+  id            String      @id @default(cuid())
   userId        String
   achievementId String
-  earnedAt      DateTime   @default(now())
-  user          User       @relation(fields: [userId], references: [id])
-  achievement   Achievement @relation(fields: [achievementId], references: [id])
+  earnedAt      DateTime    @default(now())
+  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
 
   @@unique([userId, achievementId])
 }
@@ -155,11 +164,29 @@ model Project {
   description String
   difficulty  String
   category    String
-  imageUrl    String?
   duration    String
-  skills      String   // JSON array of skills
-  steps       String   // JSON array of steps
+  skills      String   // JSON array
+  steps       String   // JSON array
   createdAt   DateTime @default(now())
+  submissions ProjectSubmission[]
+}
+
+model ProjectSubmission {
+  id          String   @id @default(cuid())
+  userId      String
+  projectId   String
+  codeUrl     String?
+  screenshotUrl String?
+  status      String   @default("pending") // pending, reviewed, approved, rejected
+  score       Int?
+  feedback    String?
+  submittedAt DateTime @default(now())
+  reviewedAt  DateTime?
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([projectId])
 }
 
 model DiscussionPost {
@@ -169,10 +196,29 @@ model DiscussionPost {
   content   String
   tags      String?  // JSON
   likes     Int      @default(0)
-  replies   Int      @default(0)
+  replyCount Int     @default(0)
+  isPinned  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  replies   DiscussionReply[]
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model DiscussionReply {
+  id        String   @id @default(cuid())
+  postId    String
+  userId    String
+  content   String
+  likes     Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  post      DiscussionPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  @@index([postId])
+  @@index([userId])
 }
 
 model CodeSnippet {
@@ -185,7 +231,9 @@ model CodeSnippet {
   isPublic  Boolean  @default(false)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  user      User     @relation(fields: [userId], references: [id])
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
 }
 
 model DailyChallenge {
@@ -199,6 +247,24 @@ model DailyChallenge {
   xpReward    Int      @default(50)
   date        String   // YYYY-MM-DD
   createdAt   DateTime @default(now())
+  submissions ChallengeSubmission[]
+}
+
+model ChallengeSubmission {
+  id          String   @id @default(cuid())
+  userId      String
+  challengeId String
+  code        String
+  passed      Boolean
+  testResults String   // JSON
+  score       Int      @default(0)
+  xpEarned    Int      @default(0)
+  submittedAt DateTime @default(now())
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  challenge   DailyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([challengeId])
 }
 
 model Leaderboard {
@@ -206,5 +272,40 @@ model Leaderboard {
   userId String @unique
   xp    Int
   rank  Int
-  user  User  @relation(fields: [userId], references: [id])
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  type      String   // course_completed, quiz_graded, certificate_earned, achievement_unlocked, discussion_reply, general
+  title     String
+  message   String
+  read      Boolean  @default(false)
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([read])
+}
+
+model ActivityLog {
+  id        String   @id @default(cuid())
+  userId    String
+  action    String   // lesson_completed, quiz_taken, challenge_submitted, project_submitted, login, etc.
+  details   String?  // JSON
+  createdAt DateTime @default(now())
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  userId    String
+  token     String   @unique
+  expiresAt DateTime
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now())
 }

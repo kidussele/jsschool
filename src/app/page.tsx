@@ -17,11 +17,17 @@ import { QuizTakeView } from "@/components/quizzes/QuizTakeView";
 import { ChallengesView } from "@/components/challenges/ChallengesView";
 import { DashboardView } from "@/components/dashboard/DashboardView";
 import { ProjectsView } from "@/components/projects/ProjectsView";
+import { ProjectDetailView } from "@/components/projects/ProjectDetailView";
 import { AITutorView } from "@/components/ai-tutor/AITutorView";
 import { CommunityView } from "@/components/community/CommunityView";
+import { PostDetailView } from "@/components/community/PostDetailView";
 import { ProfileView } from "@/components/profile/ProfileView";
 import { CertificateView } from "@/components/certificates/CertificateView";
 import { LeaderboardView } from "@/components/leaderboard/LeaderboardView";
+import { AdminView } from "@/components/admin/AdminView";
+import { SearchView } from "@/components/search/SearchView";
+import { LoginView } from "@/components/auth/LoginView";
+import { RegisterView } from "@/components/auth/RegisterView";
 
 const pageVariants = {
   initial: { opacity: 0, y: 8 },
@@ -62,11 +68,17 @@ function ViewRouter() {
     challenges: <ChallengesView />,
     dashboard: <DashboardView />,
     projects: <ProjectsView />,
+    "project-detail": <ProjectDetailView />,
     "ai-tutor": <AITutorView />,
     community: <CommunityView />,
+    "post-detail": <PostDetailView />,
     profile: <ProfileView />,
     certificates: <CertificateView />,
     leaderboard: <LeaderboardView />,
+    admin: <AdminView />,
+    search: <SearchView />,
+    login: <LoginView />,
+    register: <RegisterView />,
     home: null,
   };
 

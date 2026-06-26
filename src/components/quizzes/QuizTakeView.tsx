@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect, useCallback, useRef } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useAppStore } from "@/lib/store";
 import { quizData } from "@/lib/quiz-data";
@@ -19,28 +19,197 @@ import {
   Star,
   Lightbulb,
   Sparkles,
+  Clock,
+  Loader2,
+  ChevronLeft,
+  ChevronRight,
+  Zap,
 } from "lucide-react";
 
+// ── Types ────────────────────────────────────────────────────
+interface SubmitResult {
+  attempt: {
+    id: string;
+    score: number;
+    totalPoints: number;
+    correctCount: number;
+    totalQuestions: number;
+    timeTaken: number;
+  };
+  score: number;
+  totalPoints: number;
+  correctCount: number;
+  totalQuestions: number;
+  percentage: number;
+  xpEarned: number;
+  message: string;
+}
+
+// ── Constants ────────────────────────────────────────────────
+const SECONDS_PER_QUESTION = 60;
+
+function formatTime(seconds: number) {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return `${m}:${s.toString().padStart(2, "0")}`;
+}
+
+// ── Component ────────────────────────────────────────────────────
 export function QuizTakeView() {
-  const { currentQuiz, navigateTo } = useAppStore();
+  const { user, currentQuiz, navigateTo, setUser } = useAppStore();
+
+  // State
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
-  const [fillAnswer, setFillAnswer] = useState("");
+  const [answerMap, setAnswerMap] = useState<Record<string, string>>({});
   const [checked, setChecked] = useState(false);
-  const [score, setScore] = useState(0);
-  const [answers, setAnswers] = useState<
-    { questionId: string; selected: string; correct: string; isCorrect: boolean }[]
-  >([]);
   const [finished, setFinished] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [submitResult, setSubmitResult] = useState<SubmitResult | null>(null);
+
+  // Timer
+  const timePerQuestion = SECONDS_PER_QUESTION;
+  const [timeLeft, setTimeLeft] = useState(SECONDS_PER_QUESTION);
+  const [elapsedTotal, setElapsedTotal] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startTimeRef = useRef<number>(Date.now());
+  const globalStartRef = useRef<number>(Date.now());
 
   const quiz = useMemo(
     () => quizData.find((q) => q.id === currentQuiz?.id),
     [currentQuiz]
   );
 
-  const question = quiz?.questions[currentIndex];
+  const questions = quiz?.questions ?? [];
+  const question = questions[currentIndex];
 
-  if (!quiz || !question) {
+  // Reset timer on question change
+  useEffect(() => {
+    if (finished || !question) return;
+    setTimeLeft(timePerQuestion);
+    startTimeRef.current = Date.now();
+  }, [currentIndex, timePerQuestion, finished, question]);
+
+  // Timer tick
+  useEffect(() => {
+    if (finished || !quiz) return;
+
+    timerRef.current = setInterval(() => {
+      const now = Date.now();
+      const questionElapsed = Math.floor((now - startTimeRef.current) / 1000);
+      const totalElapsed = Math.floor(
+        (now - globalStartRef.current) / 1000
+      );
+      const remaining = Math.max(0, timePerQuestion - questionElapsed);
+
+      setTimeLeft(remaining);
+      setElapsedTotal(totalElapsed);
+    }, 1000);
+
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [finished, quiz, currentIndex, timePerQuestion]);
+
+  const handleCheck = () => {
+    if (!question) return;
+    const currentAns = answerMap[question.id];
+    if (!currentAns) return;
+    setChecked(true);
+  };
+
+  const handleNext = () => {
+    if (currentIndex < questions.length - 1) {
+      setCurrentIndex((i) => i + 1);
+      setChecked(false);
+    } else {
+      // Finish quiz — submit to API
+      finishQuiz();
+    }
+  };
+
+  // ── Submit quiz to backend ────────────────────────────────
+  const finishQuiz = async () => {
+    if (timerRef.current) clearInterval(timerRef.current);
+    setSubmitting(true);
+
+    const elapsedSeconds = Math.floor(
+      (Date.now() - globalStartRef.current) / 1000
+    );
+
+    if (user) {
+      try {
+        const res = await fetch("/api/quizzes/attempts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            userId: user.id,
+            quizId: quiz.id,
+            answers: JSON.stringify(answerMap),
+            timeTaken: elapsedSeconds,
+          }),
+        });
+
+        const data = await res.json();
+        if (res.ok) {
+          setSubmitResult(data);
+          if (data.xpEarned > 0) {
+            setUser({ ...user, xp: user.xp + data.xpEarned });
+          }
+        }
+      } catch {
+        // Fall through to local calculation
+      }
+    }
+
+    setSubmitting(false);
+    setFinished(true);
+  };
+
+  // Calculate results (before any early returns to satisfy rules-of-hooks)
+  const localScore = useMemo(() => {
+    let pts = 0;
+    let correct = 0;
+    for (const q of questions) {
+      const ans = answerMap[q.id];
+      if (
+        ans &&
+        ans.toLowerCase().trim() === q.correctAnswer.toLowerCase().trim()
+      ) {
+        pts += q.points;
+        correct++;
+      }
+    }
+    return { pts, correct };
+  }, [questions, answerMap]);
+
+  const totalPoints = questions.reduce((a, q) => a + q.points, 0);
+  const score = submitResult?.score ?? localScore.pts;
+  const correctCount = submitResult?.correctCount ?? localScore.correct;
+  const percentage =
+    submitResult?.percentage ??
+    (totalPoints > 0 ? Math.round((localScore.pts / totalPoints) * 100) : 0);
+  const xpEarned = submitResult?.xpEarned ?? localScore.correct * 10;
+
+  const progress = questions.length > 0 ? ((currentIndex + 1) / questions.length) * 100 : 0;
+  const userAnswer = answerMap[question?.id ?? ""] ?? "";
+  const isCorrect =
+    question &&
+    userAnswer.toLowerCase().trim() ===
+      question.correctAnswer.toLowerCase().trim();
+  const isLowTime = timeLeft <= 10;
+
+  const handleSelect = (option: string) => {
+    if (checked || !question) return;
+    setAnswerMap((prev) => ({ ...prev, [question.id]: option }));
+  };
+
+  const handleFillChange = (value: string) => {
+    if (checked || !question) return;
+    setAnswerMap((prev) => ({ ...prev, [question.id]: value }));
+  };
+
+  // ── Not found ────────────────────────────────────────────
+  if (!quiz) {
     return (
       <div className="mx-auto max-w-3xl px-4 py-16 text-center">
         <h2 className="text-xl font-bold mb-4">Quiz not found</h2>
@@ -49,59 +218,38 @@ export function QuizTakeView() {
     );
   }
 
-  const progress = ((currentIndex + 1) / quiz.questions.length) * 100;
-  const isCorrect =
-    selectedAnswer?.toLowerCase().trim() ===
-    question.correctAnswer.toLowerCase().trim();
-
-  const handleSelect = (option: string) => {
-    if (checked) return;
-    setSelectedAnswer(option);
-  };
-
-  const handleCheck = () => {
-    if (!selectedAnswer && !fillAnswer) return;
-    setChecked(true);
-    const userAnswer = question.type === "fill_blank" ? fillAnswer : selectedAnswer!;
-    const correct =
-      userAnswer.toLowerCase().trim() ===
-      question.correctAnswer.toLowerCase().trim();
-    if (correct) setScore((s) => s + question.points);
-    setAnswers((a) => [
-      ...a,
-      {
-        questionId: question.id,
-        selected: userAnswer,
-        correct: question.correctAnswer,
-        isCorrect: correct,
-      },
-    ]);
-  };
-
-  const handleNext = () => {
-    if (currentIndex < quiz.questions.length - 1) {
-      setCurrentIndex((i) => i + 1);
-      setSelectedAnswer(null);
-      setFillAnswer("");
-      setChecked(false);
-    } else {
-      setFinished(true);
-    }
-  };
-
   const handleRetake = () => {
     setCurrentIndex(0);
-    setSelectedAnswer(null);
-    setFillAnswer("");
+    setAnswerMap({});
     setChecked(false);
-    setScore(0);
-    setAnswers([]);
     setFinished(false);
+    setSubmitting(false);
+    setSubmitResult(null);
+    setElapsedTotal(0);
+    setTimeLeft(timePerQuestion);
+    startTimeRef.current = Date.now();
+    globalStartRef.current = Date.now();
   };
 
-  const totalPoints = quiz.questions.reduce((a, q) => a + q.points, 0);
-  const percentage = Math.round((score / totalPoints) * 100);
+  const goToQuestion = (index: number) => {
+    setCurrentIndex(index);
+    setChecked(false);
+  };
 
+  // ── Submitting state ──────────────────────────────────────
+  if (submitting) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-16 flex flex-col items-center justify-center gap-4">
+        <Loader2 className="h-10 w-10 text-js-yellow animate-spin" />
+        <p className="text-lg font-semibold">Submitting your quiz...</p>
+        <p className="text-sm text-muted-foreground">
+          Calculating your score
+        </p>
+      </div>
+    );
+  }
+
+  // ── Finished / Results screen ─────────────────────────────
   if (finished) {
     return (
       <div className="mx-auto max-w-2xl px-4 py-8 sm:py-12">
@@ -147,8 +295,7 @@ export function QuizTakeView() {
                 </div>
                 <div className="text-center">
                   <div className="text-3xl font-extrabold text-js-sky">
-                    {answers.filter((a) => a.isCorrect).length}/
-                    {quiz.questions.length}
+                    {correctCount}/{questions.length}
                   </div>
                   <div className="text-xs text-muted-foreground mt-1">
                     Correct
@@ -156,44 +303,77 @@ export function QuizTakeView() {
                 </div>
               </div>
               <Progress value={percentage} className="h-3" />
+
+              {/* XP earned */}
+              {xpEarned > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3 }}
+                  className="mt-4 flex items-center justify-center gap-2 text-sm font-semibold text-js-yellow"
+                >
+                  <Zap className="h-4 w-4" />
+                  +{xpEarned} XP earned
+                </motion.div>
+              )}
+
+              {/* Time taken */}
+              <p className="mt-2 text-xs text-muted-foreground text-center">
+                Time taken: {formatTime(elapsedTotal)}
+              </p>
             </CardContent>
           </Card>
 
-          {/* Review answers */}
+          {/* Review answers with explanations */}
           <div className="space-y-3 mb-8 text-left max-h-96 overflow-y-auto custom-scrollbar">
-            {answers.map((a, i) => (
-              <Card
-                key={a.questionId}
-                className={cn(
-                  "border",
-                  a.isCorrect
-                    ? "border-emerald-500/30 bg-emerald-500/5"
-                    : "border-rose-500/30 bg-rose-500/5"
-                )}
-              >
-                <CardContent className="py-3 px-4 flex items-start gap-3">
-                  {a.isCorrect ? (
-                    <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
-                  ) : (
-                    <XCircle className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" />
+            {questions.map((q, i) => {
+              const ans = answerMap[q.id] || "(skipped)";
+              const qCorrect =
+                ans.toLowerCase().trim() ===
+                q.correctAnswer.toLowerCase().trim();
+              return (
+                <Card
+                  key={q.id}
+                  className={cn(
+                    "border",
+                    qCorrect
+                      ? "border-emerald-500/30 bg-emerald-500/5"
+                      : "border-rose-500/30 bg-rose-500/5"
                   )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium line-clamp-1">
-                      Q{i + 1}: {quiz.questions[i]?.question}
-                    </p>
-                    {!a.isCorrect && (
-                      <p className="text-xs text-muted-foreground mt-1">
-                        Your answer: <span className="text-rose-400">{a.selected}</span> →{" "}
-                        <span className="text-emerald-400">{a.correct}</span>
-                      </p>
+                >
+                  <CardContent className="py-3 px-4 flex items-start gap-3">
+                    {qCorrect ? (
+                      <CheckCircle2 className="h-5 w-5 text-emerald-500 shrink-0 mt-0.5" />
+                    ) : (
+                      <XCircle className="h-5 w-5 text-rose-500 shrink-0 mt-0.5" />
                     )}
-                  </div>
-                  <span className="text-xs font-semibold shrink-0">
-                    {a.isCorrect ? "+" : "0"} pts
-                  </span>
-                </CardContent>
-              </Card>
-            ))}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium line-clamp-1">
+                        Q{i + 1}: {q.question}
+                      </p>
+                      {!qCorrect && (
+                        <p className="text-xs text-muted-foreground mt-1">
+                          Your answer:{" "}
+                          <span className="text-rose-400">{ans}</span> →{" "}
+                          <span className="text-emerald-400">
+                            {q.correctAnswer}
+                          </span>
+                        </p>
+                      )}
+                      {q.explanation && (
+                        <p className="text-xs text-muted-foreground mt-1.5 flex items-start gap-1.5">
+                          <Lightbulb className="h-3 w-3 text-js-yellow shrink-0 mt-0.5" />
+                          {q.explanation}
+                        </p>
+                      )}
+                    </div>
+                    <span className="text-xs font-semibold shrink-0">
+                      {qCorrect ? "+" : "0"} pts
+                    </span>
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
 
           <div className="flex gap-3 justify-center">
@@ -218,6 +398,16 @@ export function QuizTakeView() {
     );
   }
 
+  // ── Quiz question view ────────────────────────────────────
+  if (!question) {
+    return (
+      <div className="mx-auto max-w-3xl px-4 py-16 text-center">
+        <h2 className="text-xl font-bold mb-4">Question not found</h2>
+        <Button onClick={() => navigateTo("quizzes")}>Back to Quizzes</Button>
+      </div>
+    );
+  }
+
   return (
     <div className="mx-auto max-w-3xl px-4 py-8 sm:py-12">
       {/* Header */}
@@ -236,30 +426,80 @@ export function QuizTakeView() {
             <ArrowLeft className="h-4 w-4" />
             Back
           </Button>
-          <Badge
-            variant="outline"
-            className={
-              quiz.difficulty === "easy"
-                ? "border-emerald-500/30 text-emerald-500"
-                : quiz.difficulty === "medium"
-                ? "border-yellow-500/30 text-yellow-500"
-                : "border-rose-500/30 text-rose-500"
-            }
-          >
-            {quiz.difficulty}
-          </Badge>
+          <div className="flex items-center gap-2">
+            {/* Timer */}
+            <Badge
+              variant="outline"
+              className={cn(
+                "gap-1.5 font-mono tabular-nums",
+                isLowTime
+                  ? "border-rose-500/60 text-rose-500 animate-pulse"
+                  : "border-border text-muted-foreground"
+              )}
+            >
+              <Clock className="h-3.5 w-3.5" />
+              {formatTime(timeLeft)}
+            </Badge>
+            <Badge
+              variant="outline"
+              className={
+                quiz.difficulty === "easy"
+                  ? "border-emerald-500/30 text-emerald-500"
+                  : quiz.difficulty === "medium"
+                    ? "border-yellow-500/30 text-yellow-500"
+                    : "border-rose-500/30 text-rose-500"
+              }
+            >
+              {quiz.difficulty}
+            </Badge>
+          </div>
         </div>
         <div className="flex items-center justify-between text-sm text-muted-foreground mb-2">
           <span className="font-medium text-foreground">
-            Question {currentIndex + 1} of {quiz.questions.length}
+            Question {currentIndex + 1} of {questions.length}
           </span>
           <span className="flex items-center gap-1">
             <Star className="h-3.5 w-3.5 text-js-yellow" />
-            {score} pts
+            {Object.entries(answerMap).reduce((acc, [qid, ans]) => {
+              const q = questions.find((qq) => qq.id === qid);
+              if (
+                q &&
+                ans.toLowerCase().trim() ===
+                  q.correctAnswer.toLowerCase().trim()
+              ) {
+                return acc + q.points;
+              }
+              return acc;
+            }, 0)}{" "}
+            pts
           </span>
         </div>
         <Progress value={progress} className="h-2" />
       </motion.div>
+
+      {/* Question Navigator (dots) */}
+      <div className="flex items-center justify-center gap-1.5 mb-4 flex-wrap">
+        {questions.map((q, i) => {
+          const answered = !!answerMap[q.id];
+          const isCurrent = i === currentIndex;
+          return (
+            <button
+              key={q.id}
+              onClick={() => goToQuestion(i)}
+              className={cn(
+                "flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold transition-all",
+                isCurrent
+                  ? "bg-js-yellow text-js-darker scale-110"
+                  : answered
+                    ? "bg-emerald-500/20 text-emerald-500 hover:bg-emerald-500/30"
+                    : "bg-muted text-muted-foreground hover:bg-muted/80"
+              )}
+            >
+              {i + 1}
+            </button>
+          );
+        })}
+      </div>
 
       {/* Question */}
       <AnimatePresence mode="wait">
@@ -296,12 +536,13 @@ export function QuizTakeView() {
                 <div className="space-y-2.5">
                   {question.options.map((option, i) => {
                     const letter = String.fromCharCode(65 + i);
-                    const isSelected = selectedAnswer === option;
-                    const isCorrectOption =
-                      option === question.correctAnswer;
-                    let borderColor = "border-border hover:border-js-yellow/40";
+                    const isSelected = userAnswer === option;
+                    const isCorrectOption = option === question.correctAnswer;
+                    let borderColor =
+                      "border-border hover:border-js-yellow/40";
                     if (checked) {
-                      if (isCorrectOption) borderColor = "border-emerald-500 bg-emerald-500/10";
+                      if (isCorrectOption)
+                        borderColor = "border-emerald-500 bg-emerald-500/10";
                       else if (isSelected && !isCorrectOption)
                         borderColor = "border-rose-500 bg-rose-500/10";
                     }
@@ -312,10 +553,9 @@ export function QuizTakeView() {
                         onClick={() => handleSelect(option)}
                         disabled={checked}
                         className={cn(
-                          "w-full text-left flex items-center gap-3 p-3.5 rounded-xl border transition-all cursor-pointer",
+                          "w-full text-left flex items-center gap-3 p-3.5 rounded-xl border transition-all",
                           borderColor,
-                          !checked && "cursor-pointer",
-                          checked && "cursor-default"
+                          !checked ? "cursor-pointer" : "cursor-default"
                         )}
                       >
                         <span
@@ -346,8 +586,8 @@ export function QuizTakeView() {
                 <div>
                   <input
                     type="text"
-                    value={fillAnswer}
-                    onChange={(e) => setFillAnswer(e.target.value)}
+                    value={userAnswer}
+                    onChange={(e) => handleFillChange(e.target.value)}
                     disabled={checked}
                     placeholder="Type your answer..."
                     className={cn(
@@ -355,8 +595,8 @@ export function QuizTakeView() {
                       checked && isCorrect
                         ? "border-emerald-500 bg-emerald-500/10"
                         : checked && !isCorrect
-                        ? "border-rose-500 bg-rose-500/10"
-                        : ""
+                          ? "border-rose-500 bg-rose-500/10"
+                          : ""
                     )}
                   />
                 </div>
@@ -408,16 +648,30 @@ export function QuizTakeView() {
           </Card>
 
           {/* Actions */}
-          <div className="flex justify-between">
+          <div className="flex items-center justify-between">
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={currentIndex === 0}
+              onClick={() => {
+                setCurrentIndex((i) => i - 1);
+                setChecked(false);
+              }}
+              className="gap-1 text-muted-foreground"
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </Button>
+
             {!checked ? (
               <Button
                 onClick={handleCheck}
                 disabled={
                   question.type === "fill_blank"
-                    ? !fillAnswer.trim()
-                    : !selectedAnswer
+                    ? !userAnswer.trim()
+                    : !userAnswer
                 }
-                className="ml-auto gap-2 bg-js-yellow text-js-darker hover:bg-js-yellow/90 font-semibold px-8"
+                className="gap-2 bg-js-yellow text-js-darker hover:bg-js-yellow/90 font-semibold px-8"
               >
                 <Sparkles className="h-4 w-4" />
                 Check Answer
@@ -425,14 +679,28 @@ export function QuizTakeView() {
             ) : (
               <Button
                 onClick={handleNext}
-                className="ml-auto gap-2 bg-js-yellow text-js-darker hover:bg-js-yellow/90 font-semibold px-8"
+                className="gap-2 bg-js-yellow text-js-darker hover:bg-js-yellow/90 font-semibold px-8"
               >
-                {currentIndex < quiz.questions.length - 1
+                {currentIndex < questions.length - 1
                   ? "Next Question"
                   : "Finish Quiz"}
                 <ArrowRight className="h-4 w-4" />
               </Button>
             )}
+
+            <Button
+              variant="ghost"
+              size="sm"
+              disabled={currentIndex === questions.length - 1}
+              onClick={() => {
+                setCurrentIndex((i) => i + 1);
+                setChecked(false);
+              }}
+              className="gap-1 text-muted-foreground"
+            >
+              Skip
+              <ChevronRight className="h-4 w-4" />
+            </Button>
           </div>
         </motion.div>
       </AnimatePresence>
