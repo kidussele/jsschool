@@ -191,14 +191,14 @@ export function HeroSection() {
               <div className="pl-4 sm:pl-6">{"}"}</div>
               <div>{"}"};</div>
               <div className="mt-2">
-                <span className="text-muted-foreground">// Start your journey →</span>
+                <span className="text-muted-foreground">{'// Start your journey →'}</span>
               </div>
               <div>
                 <span className="text-js-sky">hero</span>
                 <span className="text-muted-foreground">.</span>
                 <span className="text-js-violet">learn</span>
                 <span className="text-muted-foreground">();</span>{" "}
-                <span className="text-muted-foreground">// &quot;Level up! 🚀&quot;</span>
+                <span className="text-muted-foreground">{'// "Level up! 🚀"'}</span>
               </div>
             </div>
           </div>
