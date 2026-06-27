@@ -126,9 +126,9 @@ export function PlaygroundView() {
   const { resolvedTheme } = useTheme();
 
   const [activeTab, setActiveTab] = useState<TabKey>("html");
-  const [htmlCode, setHtmlCode] = useState(DEFAULTS.html);
-  const [cssCode, setCssCode] = useState(DEFAULTS.css);
-  const [jsCode, setJsCode] = useState(DEFAULTS.js);
+  const [htmlCode, setHtmlCode] = useState<string>(DEFAULTS.html);
+  const [cssCode, setCssCode] = useState<string>(DEFAULTS.css);
+  const [jsCode, setJsCode] = useState<string>(DEFAULTS.js);
   const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [hasRun, setHasRun] = useState(false);
@@ -236,14 +236,14 @@ export function PlaygroundView() {
     }
   };
 
-  const getActiveSetter = () => {
+  const getActiveSetter = (): ((val: string) => void) => {
     switch (activeTab) {
       case "html":
-        return setHtmlCode;
+        return (val: string) => setHtmlCode(val);
       case "css":
-        return setCssCode;
+        return (val: string) => setCssCode(val);
       case "js":
-        return setJsCode;
+        return (val: string) => setJsCode(val);
     }
   };
 

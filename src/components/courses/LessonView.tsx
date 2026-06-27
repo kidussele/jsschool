@@ -115,7 +115,7 @@ function CodeBlock({
   className,
   children,
   ...props
-}: React.HTMLAttributes<HTMLElement> & { children?: string }) {
+}: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const [copied, setCopied] = useState(false);
@@ -251,7 +251,7 @@ const markdownComponents = {
     className,
     children,
     ...props
-  }: React.HTMLAttributes<HTMLElement> & { children?: string }) => {
+  }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) => {
     if (className && /language-/.test(className)) {
       return <CodeBlock className={className} {...props}>{children}</CodeBlock>;
     }

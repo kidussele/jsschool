@@ -88,7 +88,7 @@ export async function GET(request: NextRequest) {
           ],
         },
         take: 10,
-        select: { id: true, title: true, type: true as never },
+        select: { id: true, title: true },
       });
       results.posts = posts.map((p) => ({ ...p, type: "post" }));
     }

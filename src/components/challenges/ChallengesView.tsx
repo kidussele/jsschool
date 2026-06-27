@@ -137,7 +137,6 @@ export function ChallengesView() {
       const end = target.selectionEnd;
       const updated = code.substring(0, start) + "  " + code.substring(end);
       setCode(updated);
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTimeout(() => {
         target.selectionStart = target.selectionEnd = start + 2;
       }, 0);

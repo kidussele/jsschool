@@ -1,0 +1,1034 @@
+     1→"use client";
+     2→
+     3→import { useMemo, useCallback, useState, useEffect, useRef } from "react";
+     4→import { motion, AnimatePresence } from "framer-motion";
+     5→import { useTheme } from "next-themes";
+     6→import ReactMarkdown from "react-markdown";
+     7→import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+     8→import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+     9→import { oneLight } from "react-syntax-highlighter/dist/esm/styles/prism";
+    10→import {
+    11→  ArrowLeft,
+    12→  ChevronLeft,
+    13→  ChevronRight,
+    14→  Play,
+    15→  Copy,
+    16→  Check,
+    17→  BookOpen,
+    18→  FileCode,
+    19→  Bookmark,
+    20→  BookmarkCheck,
+    21→  CheckCircle2,
+    22→  Loader2,
+    23→  PanelLeftClose,
+    24→  PanelLeftOpen,
+    25→  Clock,
+    26→  StickyNote,
+    27→} from "lucide-react";
+    28→import { Button } from "@/components/ui/button";
+    29→import { Card, CardContent } from "@/components/ui/card";
+    30→import { Badge } from "@/components/ui/badge";
+    31→import { Skeleton } from "@/components/ui/skeleton";
+    32→import { Textarea } from "@/components/ui/textarea";
+    33→import {
+    34→  Breadcrumb,
+    35→  BreadcrumbList,
+    36→  BreadcrumbItem,
+    37→  BreadcrumbLink,
+    38→  BreadcrumbPage,
+    39→  BreadcrumbSeparator,
+    40→} from "@/components/ui/breadcrumb";
+    41→import { useAppStore } from "@/lib/store";
+    42→import {
+    43→  courseData,
+    44→  type CourseLevel,
+    45→  type CourseModule,
+    46→  type CourseLesson,
+    47→} from "@/lib/course-data";
+    48→import { cn } from "@/lib/utils";
+    49→
+    50→// ── Types ────────────────────────────────────────────────────
+    51→interface LessonProgress {
+    52→  id: string;
+    53→  lessonId: string;
+    54→  status: string;
+    55→  xpEarned: number;
+    56→  timeSpent: number;
+    57→  completedAt: string | null;
+    58→}
+    59→
+    60→interface BookmarkItem {
+    61→  id: string;
+    62→  lessonId: string | null;
+    63→  postId: string | null;
+    64→  createdAt: string;
+    65→}
+    66→
+    67→// ── Helpers ──────────────────────────────────────────────────
+    68→
+    69→/** Flatten every lesson with its parent references into a lookup map */
+    70→function buildLessonMap() {
+    71→  const map = new Map<
+    72→    string,
+    73→    { lesson: CourseLesson; module: CourseModule; level: CourseLevel }
+    74→  >();
+    75→  for (const level of courseData) {
+    76→    for (const mod of level.modules) {
+    77→      for (const lesson of mod.lessons) {
+    78→        map.set(lesson.id, { lesson, module: mod, level });
+    79→      }
+    80→    }
+    81→  }
+    82→  return map;
+    83→}
+    84→
+    85→/** Get a sorted array of all lesson IDs for prev/next navigation */
+    86→function buildOrderedLessonIds(): {
+    87→  ids: string[];
+    88→  data: { lesson: CourseLesson; module: CourseModule; level: CourseLevel }[];
+    89→} {
+    90→  const result: {
+    91→    ids: string[];
+    92→    data: {
+    93→      lesson: CourseLesson;
+    94→      module: CourseModule;
+    95→      level: CourseLevel;
+    96→    }[];
+    97→  } = { ids: [], data: [] };
+    98→  for (const level of courseData) {
+    99→    for (const mod of level.modules) {
+   100→      const sorted = [...mod.lessons].sort((a, b) => a.order - b.order);
+   101→      for (const les of sorted) {
+   102→        result.ids.push(les.id);
+   103→        result.data.push({ lesson: les, module: mod, level });
+   104→      }
+   105→    }
+   106→  }
+   107→  return result;
+   108→}
+   109→
+   110→const lessonMap = buildLessonMap();
+   111→const { ids: orderedIds, data: orderedLessons } = buildOrderedLessonIds();
+   112→
+   113→// ── Code block renderer ──────────────────────────────────────
+   114→function CodeBlock({
+   115→  className,
+   116→  children,
+   117→  ...props
+   118→}: React.HTMLAttributes<HTMLElement> & { children?: string }) {
+   119→  const { resolvedTheme } = useTheme();
+   120→  const isDark = resolvedTheme === "dark";
+   121→  const [copied, setCopied] = useState(false);
+   122→  const match = /language-(\w+)/.exec(className || "");
+   123→  const lang = match ? match[1] : "javascript";
+   124→  const code = String(children).replace(/\n$/, "");
+   125→
+   126→  const handleCopy = useCallback(() => {
+   127→    navigator.clipboard.writeText(code);
+   128→    setCopied(true);
+   129→    setTimeout(() => setCopied(false), 2000);
+   130→  }, [code]);
+   131→
+   132→  return (
+   133→    <div className="group/code relative my-4 overflow-hidden rounded-xl border border-border/50">
+   134→      {/* Header bar */}
+   135→      <div className="flex items-center justify-between border-b border-border/50 bg-muted/40 px-4 py-2">
+   136→        <div className="flex items-center gap-2">
+   137→          <FileCode className="h-3.5 w-3.5 text-muted-foreground" />
+   138→          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+   139→            {lang}
+   140→          </span>
+   141→        </div>
+   142→        <Button
+   143→          variant="ghost"
+   144→          size="sm"
+   145→          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground opacity-0 transition-opacity group-hover/code:opacity-100"
+   146→          onClick={handleCopy}
+   147→        >
+   148→          {copied ? (
+   149→            <>
+   150→              <Check className="h-3 w-3 text-emerald-500" />
+   151→              Copied
+   152→            </>
+   153→          ) : (
+   154→            <>
+   155→              <Copy className="h-3 w-3" />
+   156→              Copy
+   157→            </>
+   158→          )}
+   159→        </Button>
+   160→      </div>
+   161→      <SyntaxHighlighter
+   162→        language={lang}
+   163→        style={isDark ? oneDark : oneLight}
+   164→        PreTag="div"
+   165→        customStyle={{
+   166→          margin: 0,
+   167→          padding: "1rem 1.25rem",
+   168→          fontSize: "0.85rem",
+   169→          lineHeight: "1.65",
+   170→          background: isDark ? "#1a1a2e" : "#fafafa",
+   171→        }}
+   172→        codeTagProps={{
+   173→          className: "code-editor",
+   174→        }}
+   175→        {...props}
+   176→      >
+   177→        {code}
+   178→      </SyntaxHighlighter>
+   179→    </div>
+   180→  );
+   181→}
+   182→
+   183→// ── Markdown components override ──────────────────────────────
+   184→const markdownComponents = {
+   185→  h1: (props: React.HTMLAttributes<HTMLHeadingElement>) => (
+   186→    <h1
+   187→      className="mb-4 mt-8 text-2xl font-extrabold tracking-tight sm:text-3xl first:mt-0"
+   188→      {...props}
+   189→    />
+   190→  ),
+   191→  h2: (props: React.HTMLAttributes<HTMLHeadingElement>) => (
+   192→    <h2
+   193→      className="mb-3 mt-7 flex items-center gap-2 text-xl font-bold sm:text-2xl"
+   194→      {...props}
+   195→    />
+   196→  ),
+   197→  h3: (props: React.HTMLAttributes<HTMLHeadingElement>) => (
+   198→    <h3 className="mb-2 mt-5 text-lg font-semibold" {...props} />
+   199→  ),
+   200→  p: (props: React.HTMLAttributes<HTMLParagraphElement>) => (
+   201→    <p className="mb-4 leading-relaxed text-foreground/90" {...props} />
+   202→  ),
+   203→  ul: (props: React.HTMLAttributes<HTMLUListElement>) => (
+   204→    <ul className="mb-4 list-disc space-y-1.5 pl-6" {...props} />
+   205→  ),
+   206→  ol: (props: React.HTMLAttributes<HTMLOListElement>) => (
+   207→    <ol className="mb-4 list-decimal space-y-1.5 pl-6" {...props} />
+   208→  ),
+   209→  li: (props: React.HTMLAttributes<HTMLLIElement>) => (
+   210→    <li className="text-foreground/85 leading-relaxed" {...props} />
+   211→  ),
+   212→  strong: (props: React.HTMLAttributes<HTMLElement>) => (
+   213→    <strong className="font-bold text-foreground" {...props} />
+   214→  ),
+   215→  em: (props: React.HTMLAttributes<HTMLElement>) => (
+   216→    <em className="italic text-foreground/80" {...props} />
+   217→  ),
+   218→  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+   219→    <a
+   220→      className="font-medium text-[#F7DF1E] underline decoration-[#F7DF1E]/40 underline-offset-4 transition-colors hover:text-[#F7DF1E]/80 hover:decoration-[#F7DF1E]/60"
+   221→      target="_blank"
+   222→      rel="noopener noreferrer"
+   223→      {...props}
+   224→    />
+   225→  ),
+   226→  blockquote: (props: React.HTMLAttributes<HTMLQuoteElement>) => (
+   227→    <blockquote
+   228→      className="my-4 border-l-4 border-[#F7DF1E]/50 bg-[#F7DF1E]/5 py-3 pl-4 pr-4 rounded-r-lg italic text-foreground/80"
+   229→      {...props}
+   230→    />
+   231→  ),
+   232→  table: (props: React.HTMLAttributes<HTMLTableElement>) => (
+   233→    <div className="my-4 overflow-x-auto rounded-lg border border-border/50">
+   234→      <table className="w-full text-sm" {...props} />
+   235→    </div>
+   236→  ),
+   237→  thead: (props: React.HTMLAttributes<HTMLTableSectionElement>) => (
+   238→    <thead className="border-b border-border/50 bg-muted/30" {...props} />
+   239→  ),
+   240→  th: (props: React.HTMLAttributes<HTMLTableCellElement>) => (
+   241→    <th
+   242→      className="px-4 py-2.5 text-left font-semibold text-foreground/80"
+   243→      {...props}
+   244→    />
+   245→  ),
+   246→  td: (props: React.HTMLAttributes<HTMLTableCellElement>) => (
+   247→    <td className="border-t border-border/30 px-4 py-2" {...props} />
+   248→  ),
+   249→  hr: () => <hr className="my-6 border-border/30" />,
+   250→  code: ({
+   251→    className,
+   252→    children,
+   253→    ...props
+   254→  }: React.HTMLAttributes<HTMLElement> & { children?: string }) => {
+   255→    if (className && /language-/.test(className)) {
+   256→      return <CodeBlock className={className} {...props}>{children}</CodeBlock>;
+   257→    }
+   258→    return (
+   259→      <code
+   260→        className="rounded-md bg-muted/60 px-1.5 py-0.5 text-[0.85em] font-mono text-foreground/90 border border-border/30"
+   261→        {...props}
+   262→      >
+   263→        {children}
+   264→      </code>
+   265→    );
+   266→  },
+   267→  pre: (props: React.HTMLAttributes<HTMLPreElement>) => {
+   268→    return <>{props.children}</>;
+   269→  },
+   270→};
+   271→
+   272→// ── Component ────────────────────────────────────────────────────
+   273→export function LessonView() {
+   274→  const { user, currentLesson, navigateTo, setCurrentLesson, setCurrentView, setUser } =
+   275→    useAppStore();
+   276→
+   277→  // UI state
+   278→  const [sidebarOpen, setSidebarOpen] = useState(false);
+   279→  const [notesOpen, setNotesOpen] = useState(false);
+   280→  const [noteContent, setNoteContent] = useState("");
+   281→  const [savingNote, setSavingNote] = useState(false);
+   282→  const [noteSaved, setNoteSaved] = useState(false);
+   283→
+   284→  // Backend state
+   285→  const [progressList, setProgressList] = useState<LessonProgress[]>([]);
+   286→  const [isBookmarked, setIsBookmarked] = useState(false);
+   287→  const [bookmarkId, setBookmarkId] = useState<string | null>(null);
+   288→  const [isCompleted, setIsCompleted] = useState(false);
+   289→  const [completing, setCompleting] = useState(false);
+   290→  const [loadingProgress, setLoadingProgress] = useState(true);
+   291→
+   292→  // Timer
+   293→  const startTimeRef = useRef<number>(Date.now());
+   294→  const [timeSpentDisplay, setTimeSpentDisplay] = useState(0);
+   295→  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+   296→
+   297→  // Resolve current lesson data
+   298→  const lessonData = useMemo(() => {
+   299→    if (!currentLesson) return null;
+   300→    return lessonMap.get(currentLesson.id) ?? null;
+   301→  }, [currentLesson]);
+   302→
+   303→  // Prev / next navigation
+   304→  const { prevLesson, nextLesson } = useMemo(() => {
+   305→    if (!currentLesson) return { prevLesson: null, nextLesson: null };
+   306→    const idx = orderedIds.indexOf(currentLesson.id);
+   307→    const prev =
+   308→      idx > 0 ? orderedLessons[idx - 1] ?? null : null;
+   309→    const next =
+   310→      idx < orderedLessons.length - 1 ? orderedLessons[idx + 1] ?? null : null;
+   311→    return { prevLesson: prev, nextLesson: next };
+   312→  }, [currentLesson]);
+   313→
+   314→  // ── Fetch progress, bookmarks, notes on mount / lesson change ──
+   315→  useEffect(() => {
+   316→    if (!currentLesson || !user) {
+   317→      setLoadingProgress(false);
+   318→      return;
+   319→    }
+   320→
+   321→    const lessonId = currentLesson.id;
+   322→    const userId = user.id;
+   323→    let cancelled = false;
+   324→
+   325→    async function fetchLessonData() {
+   326→      setLoadingProgress(true);
+   327→      try {
+   328→        const [progressRes, bookmarksRes, notesRes] = await Promise.allSettled([
+   329→          fetch(`/api/progress?userId=${userId}`),
+   330→          fetch(`/api/bookmarks?userId=${userId}`),
+   331→          fetch(`/api/progress/notes?userId=${userId}&lessonId=${lessonId}`),
+   332→        ]);
+   333→
+   334→        if (cancelled) return;
+   335→
+   336→        // Process progress
+   337→        if (progressRes.status === "fulfilled" && progressRes.value.ok) {
+   338→          const pData = await progressRes.value.json();
+   339→          const list: LessonProgress[] = pData.progress || [];
+   340→          setProgressList(list);
+   341→          const current = list.find((p: LessonProgress) => p.lessonId === lessonId);
+   342→          setIsCompleted(current?.status === "completed" || false);
+   343→        }
+   344→
+   345→        // Process bookmarks
+   346→        if (bookmarksRes.status === "fulfilled" && bookmarksRes.value.ok) {
+   347→          const bData = await bookmarksRes.value.json();
+   348→          const bmList: BookmarkItem[] = bData.bookmarks || [];
+   349→          const found = bmList.find((b) => b.lessonId === lessonId);
+   350→          if (found) {
+   351→            setIsBookmarked(true);
+   352→            setBookmarkId(found.id);
+   353→          } else {
+   354→            setIsBookmarked(false);
+   355→            setBookmarkId(null);
+   356→          }
+   357→        }
+   358→
+   359→        // Process notes
+   360→        if (notesRes.status === "fulfilled" && notesRes.value.ok) {
+   361→          const nData = await notesRes.value.json();
+   362→          if (nData.note) {
+   363→            setNoteContent(nData.note.content || "");
+   364→          } else {
+   365→            setNoteContent("");
+   366→          }
+   367→        }
+   368→      } catch {
+   369→        // Silently fail
+   370→      } finally {
+   371→        if (!cancelled) setLoadingProgress(false);
+   372→      }
+   373→    }
+   374→
+   375→    fetchLessonData();
+   376→
+   377→    // Auto-save as in_progress
+   378→    fetch(`/api/progress`, {
+   379→      method: "POST",
+   380→      headers: { "Content-Type": "application/json" },
+   381→      body: JSON.stringify({
+   382→        userId,
+   383→        lessonId,
+   384→        status: "in_progress",
+   385→        xpEarned: 0,
+   386→        timeSpent: 0,
+   387→      }),
+   388→    }).catch(() => {});
+   389→
+   390→    return () => {
+   391→      cancelled = true;
+   392→    };
+   393→  }, [currentLesson, user]);
+   394→
+   395→  // ── Time tracking ──────────────────────────────────────────
+   396→  useEffect(() => {
+   397→    startTimeRef.current = Date.now();
+   398→
+   399→    timerRef.current = setInterval(() => {
+   400→      const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+   401→      setTimeSpentDisplay(elapsed);
+   402→    }, 1000);
+   403→
+   404→    return () => {
+   405→      if (timerRef.current) clearInterval(timerRef.current);
+   406→      // Save time spent on unmount
+   407→      if (user && currentLesson) {
+   408→        const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+   409→        if (elapsed > 0) {
+   410→          fetch(`/api/progress`, {
+   411→            method: "POST",
+   412→            headers: { "Content-Type": "application/json" },
+   413→            body: JSON.stringify({
+   414→              userId: user.id,
+   415→              lessonId: currentLesson.id,
+   416→              status: isCompleted ? "completed" : "in_progress",
+   417→              xpEarned: 0,
+   418→              timeSpent: elapsed,
+   419→            }),
+   420→          }).catch(() => {});
+   421→        }
+   422→      }
+   423→    };
+   424→  }, [currentLesson, user]);
+   425→
+   426→  // ── Actions ────────────────────────────────────────────────
+   427→  const saveNote = useCallback(async () => {
+   428→    if (!user || !currentLesson || savingNote) return;
+   429→    setSavingNote(true);
+   430→    try {
+   431→      await fetch("/api/progress/notes", {
+   432→        method: "POST",
+   433→        headers: { "Content-Type": "application/json" },
+   434→        body: JSON.stringify({
+   435→          userId: user.id,
+   436→          lessonId: currentLesson.id,
+   437→          content: noteContent,
+   438→        }),
+   439→      });
+   440→      setNoteSaved(true);
+   441→      setTimeout(() => setNoteSaved(false), 2000);
+   442→    } catch {
+   443→      // Silent fail
+   444→    } finally {
+   445→      setSavingNote(false);
+   446→    }
+   447→  }, [user, currentLesson, noteContent, savingNote]);
+   448→
+   449→  const toggleBookmark = useCallback(async () => {
+   450→    if (!user || !currentLesson) return;
+   451→    try {
+   452→      if (isBookmarked && bookmarkId) {
+   453→        await fetch("/api/bookmarks", {
+   454→          method: "DELETE",
+   455→          headers: { "Content-Type": "application/json" },
+   456→          body: JSON.stringify({ bookmarkId }),
+   457→        });
+   458→        setIsBookmarked(false);
+   459→        setBookmarkId(null);
+   460→      } else {
+   461→        const res = await fetch("/api/bookmarks", {
+   462→          method: "POST",
+   463→          headers: { "Content-Type": "application/json" },
+   464→          body: JSON.stringify({
+   465→            userId: user.id,
+   466→            lessonId: currentLesson.id,
+   467→          }),
+   468→        });
+   469→        const data = await res.json();
+   470→        if (data.bookmark) {
+   471→          setIsBookmarked(true);
+   472→          setBookmarkId(data.bookmark.id);
+   473→        }
+   474→      }
+   475→    } catch {
+   476→      // Silent fail
+   477→    }
+   478→  }, [user, currentLesson, isBookmarked, bookmarkId]);
+   479→
+   480→  const handleMarkComplete = useCallback(async () => {
+   481→    if (!user || !currentLesson || completing) return;
+   482→    setCompleting(true);
+   483→    const elapsed = Math.floor((Date.now() - startTimeRef.current) / 1000);
+   484→    try {
+   485→      const res = await fetch("/api/progress", {
+   486→        method: "POST",
+   487→        headers: { "Content-Type": "application/json" },
+   488→        body: JSON.stringify({
+   489→          userId: user.id,
+   490→          lessonId: currentLesson.id,
+   491→          status: "completed",
+   492→          xpEarned: 25,
+   493→          timeSpent: elapsed,
+   494→        }),
+   495→      });
+   496→      const data = await res.json();
+   497→      setIsCompleted(true);
+   498→      if (data.xpAwarded || true) {
+   499→        setUser({ ...user, xp: user.xp + 25 });
+   500→      }
+   501→      // Update progress list
+   502→      setProgressList((prev) => {
+   503→        const idx = prev.findIndex((p) => p.lessonId === currentLesson.id);
+   504→        const entry: LessonProgress = {
+   505→          id: prev[idx]?.id || "",
+   506→          lessonId: currentLesson.id,
+   507→          status: "completed",
+   508→          xpEarned: 25,
+   509→          timeSpent: elapsed,
+   510→          completedAt: new Date().toISOString(),
+   511→        };
+   512→        if (idx >= 0) {
+   513→          const copy = [...prev];
+   514→          copy[idx] = entry;
+   515→          return copy;
+   516→        }
+   517→        return [...prev, entry];
+   518→      });
+   519→    } catch {
+   520→      // Silent fail
+   521→    } finally {
+   522→      setCompleting(false);
+   523→    }
+   524→  }, [user, currentLesson, completing, setUser]);
+   525→
+   526→  const goToLesson = useCallback(
+   527→    (
+   528→      target: {
+   529→        lesson: CourseLesson;
+   530→        module: CourseModule;
+   531→        level: CourseLevel;
+   532→      } | null
+   533→    ) => {
+   534→      if (!target) return;
+   535→      setCurrentLesson({
+   536→        id: target.lesson.id,
+   537→        title: target.lesson.title,
+   538→        moduleId: target.module.id,
+   539→        levelId: target.level.id,
+   540→        order: target.lesson.order,
+   541→      });
+   542→      setNotesOpen(false);
+   543→      window.scrollTo({ top: 0, behavior: "smooth" });
+   544→    },
+   545→    [setCurrentLesson]
+   546→  );
+   547→
+   548→  const handleRunInPlayground = useCallback(() => {
+   549→    navigateTo("playground");
+   550→  }, [navigateTo]);
+   551→
+   552→  const handleBackToCourses = useCallback(() => {
+   553→    setCurrentView("courses");
+   554→  }, [setCurrentView]);
+   555→
+   556→  // ── Not found state ────────────────────────────────────────
+   557→  if (!currentLesson || !lessonData) {
+   558→    return (
+   559→      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 px-4 text-center">
+   560→        <BookOpen className="h-16 w-16 text-muted-foreground/30" />
+   561→        <h2 className="text-xl font-bold text-muted-foreground">
+   562→          No lesson selected
+   563→        </h2>
+   564→        <p className="max-w-md text-sm text-muted-foreground/70">
+   565→          Go back to the course list and pick a lesson to start learning.
+   566→        </p>
+   567→        <Button onClick={handleBackToCourses} variant="outline">
+   568→          <ArrowLeft className="mr-2 h-4 w-4" />
+   569→          Back to Courses
+   570→        </Button>
+   571→      </div>
+   572→    );
+   573→  }
+   574→
+   575→  const { lesson, module: mod, level } = lessonData;
+   576→  const levelColor =
+   577→    level.color === "#10B981"
+   578→      ? "#10B981"
+   579→      : level.color === "#38BDF8"
+   580→        ? "#38BDF8"
+   581→        : level.color === "#8B5CF6"
+   582→          ? "#8B5CF6"
+   583→          : "#F43F5E";
+   584→
+   585→  function formatTimer(s: number) {
+   586→    const m = Math.floor(s / 60);
+   587→    const sec = s % 60;
+   588→    return `${m}:${sec.toString().padStart(2, "0")}`;
+   589→  }
+   590→
+   591→  // Build completed lesson IDs set for sidebar
+   592→  const completedIds = new Set(progressList.filter((p) => p.status === "completed").map((p) => p.lessonId));
+   593→
+   594→  return (
+   595→    <AnimatePresence mode="wait">
+   596→      <motion.section
+   597→        key={lesson.id}
+   598→        initial={{ opacity: 0, y: 16 }}
+   599→        animate={{ opacity: 1, y: 0 }}
+   600→        exit={{ opacity: 0, y: -16 }}
+   601→        transition={{ duration: 0.3, ease: "easeOut" }}
+   602→        className="relative min-h-screen w-full"
+   603→      >
+   604→        {/* Background decoration */}
+   605→        <div className="pointer-events-none absolute inset-0 overflow-hidden">
+   606→          <div
+   607→            className="absolute -left-32 top-0 h-72 w-72 rounded-full opacity-[0.07] blur-3xl"
+   608→            style={{ backgroundColor: levelColor }}
+   609→          />
+   610→          <div className="absolute -right-32 bottom-20 h-80 w-80 rounded-full bg-[#F7DF1E]/[0.04] blur-3xl" />
+   611→        </div>
+   612→
+   613→        <div className="relative z-10 flex">
+   614→          {/* ── Sidebar (lesson list) ──────────────────────── */}
+   615→          {/* Mobile overlay */}
+   616→          {sidebarOpen && (
+   617→            <div
+   618→              className="fixed inset-0 z-40 bg-black/50 lg:hidden"
+   619→              onClick={() => setSidebarOpen(false)}
+   620→            />
+   621→          )}
+   622→
+   623→          <aside
+   624→            className={cn(
+   625→              "fixed top-0 left-0 z-50 h-full w-72 border-r border-border/50 bg-background overflow-y-auto custom-scrollbar transition-transform duration-300 lg:relative lg:z-auto lg:translate-x-0 lg:border-r lg:bg-card/30",
+   626→              sidebarOpen
+   627→                ? "translate-x-0"
+   628→                : "-translate-x-full"
+   629→            )}
+   630→          >
+   631→            <div className="sticky top-0 flex items-center justify-between border-b border-border/50 bg-background px-4 py-3 lg:bg-card/30">
+   632→              <span className="text-sm font-semibold">Lessons</span>
+   633→              <Button
+   634→                variant="ghost"
+   635→                size="sm"
+   636→                className="lg:hidden"
+   637→                onClick={() => setSidebarOpen(false)}
+   638→              >
+   639→                <PanelLeftClose className="h-4 w-4" />
+   640→              </Button>
+   641→            </div>
+   642→            <div className="p-3">
+   643→              {orderedLessons.map((item, idx) => {
+   644→                const isActive = item.lesson.id === lesson.id;
+   645→                const done = completedIds.has(item.lesson.id);
+   646→                return (
+   647→                  <button
+   648→                    key={item.lesson.id}
+   649→                    onClick={() => goToLesson(item)}
+   650→                    className={cn(
+   651→                      "flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-sm transition-colors",
+   652→                      isActive
+   653→                        ? "bg-js-yellow/10 text-foreground font-medium"
+   654→                        : "text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+   655→                    )}
+   656→                  >
+   657→                    <span
+   658→                      className={cn(
+   659→                        "flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold",
+   660→                        done
+   661→                          ? "bg-emerald-500/20 text-emerald-500"
+   662→                          : isActive
+   663→                            ? "bg-js-yellow text-js-darker"
+   664→                            : "bg-muted text-muted-foreground"
+   665→                      )}
+   666→                    >
+   667→                      {done ? (
+   668→                        <CheckCircle2 className="h-3.5 w-3.5" />
+   669→                      ) : (
+   670→                        idx + 1
+   671→                      )}
+   672→                    </span>
+   673→                    <span className="line-clamp-1">{item.lesson.title}</span>
+   674→                  </button>
+   675→                );
+   676→              })}
+   677→            </div>
+   678→          </aside>
+   679→
+   680→          {/* ── Main content ─────────────────────────────── */}
+   681→          <div className="flex-1 min-w-0">
+   682→            <div className="mx-auto max-w-4xl px-4 pb-20 pt-6 sm:px-6 lg:px-8">
+   683→              {/* ── Top bar ─────────────────────────────── */}
+   684→              <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   685→                <div className="flex items-center gap-2">
+   686→                  <Button
+   687→                    variant="ghost"
+   688→                    size="sm"
+   689→                    className="lg:hidden gap-1 text-muted-foreground"
+   690→                    onClick={() => setSidebarOpen(!sidebarOpen)}
+   691→                  >
+   692→                    {sidebarOpen ? (
+   693→                      <PanelLeftClose className="h-4 w-4" />
+   694→                    ) : (
+   695→                      <PanelLeftOpen className="h-4 w-4" />
+   696→                    )}
+   697→                  </Button>
+   698→                  <Button
+   699→                    variant="ghost"
+   700→                    size="sm"
+   701→                    className="gap-2 text-muted-foreground hover:text-foreground"
+   702→                    onClick={handleBackToCourses}
+   703→                  >
+   704→                    <ArrowLeft className="h-4 w-4" />
+   705→                    <span className="hidden sm:inline">Back to Courses</span>
+   706→                    <span className="sm:hidden">Back</span>
+   707→                  </Button>
+   708→                </div>
+   709→
+   710→                <div className="flex items-center gap-2 flex-wrap">
+   711→                  {/* Timer */}
+   712→                  <Badge variant="outline" className="gap-1.5 font-mono tabular-nums text-xs">
+   713→                    <Clock className="h-3 w-3" />
+   714→                    {formatTimer(timeSpentDisplay)}
+   715→                  </Badge>
+   716→
+   717→                  {/* Bookmark toggle */}
+   718→                  <Button
+   719→                    variant="ghost"
+   720→                    size="sm"
+   721→                    className={cn(
+   722→                      "gap-1.5",
+   723→                      isBookmarked
+   724→                        ? "text-js-yellow"
+   725→                        : "text-muted-foreground"
+   726→                    )}
+   727→                    onClick={toggleBookmark}
+   728→                  >
+   729→                    {isBookmarked ? (
+   730→                      <BookmarkCheck className="h-4 w-4" />
+   731→                    ) : (
+   732→                      <Bookmark className="h-4 w-4" />
+   733→                    )}
+   734→                    <span className="hidden sm:inline text-xs">
+   735→                      {isBookmarked ? "Bookmarked" : "Bookmark"}
+   736→                    </span>
+   737→                  </Button>
+   738→
+   739→                  {/* Notes toggle */}
+   740→                  <Button
+   741→                    variant="ghost"
+   742→                    size="sm"
+   743→                    className={cn(
+   744→                      "gap-1.5",
+   745→                      notesOpen
+   746→                        ? "text-js-sky"
+   747→                        : "text-muted-foreground"
+   748→                    )}
+   749→                    onClick={() => setNotesOpen(!notesOpen)}
+   750→                  >
+   751→                    <StickyNote className="h-4 w-4" />
+   752→                    <span className="hidden sm:inline text-xs">Notes</span>
+   753→                  </Button>
+   754→
+   755→                  {lesson.codeExample && (
+   756→                    <Button
+   757→                      onClick={handleRunInPlayground}
+   758→                      className="gap-2 bg-[#F7DF1E] text-[#1E293B] font-semibold hover:bg-[#F7DF1E]/90 shadow-[0_0_20px_rgba(247,223,30,0.2)] transition-shadow hover:shadow-[0_0_30px_rgba(247,223,30,0.35)]"
+   759→                    >
+   760→                      <Play className="h-4 w-4" />
+   761→                      <span className="hidden sm:inline">Run in Playground</span>
+   762→                      <span className="sm:hidden">Run</span>
+   763→                    </Button>
+   764→                  )}
+   765→                </div>
+   766→              </div>
+   767→
+   768→              {/* ── Breadcrumbs ──────────────────────────── */}
+   769→              <Breadcrumb className="mb-6">
+   770→                <BreadcrumbList>
+   771→                  <BreadcrumbItem>
+   772→                    <BreadcrumbLink
+   773→                      className="cursor-pointer"
+   774→                      onClick={handleBackToCourses}
+   775→                    >
+   776→                      {level.title}
+   777→                    </BreadcrumbLink>
+   778→                  </BreadcrumbItem>
+   779→                  <BreadcrumbSeparator />
+   780→                  <BreadcrumbItem>
+   781→                    <BreadcrumbLink
+   782→                      className="cursor-pointer"
+   783→                      onClick={handleBackToCourses}
+   784→                    >
+   785→                      {mod.title}
+   786→                    </BreadcrumbLink>
+   787→                  </BreadcrumbItem>
+   788→                  <BreadcrumbSeparator />
+   789→                  <BreadcrumbItem>
+   790→                    <BreadcrumbPage className="font-medium">
+   791→                      {lesson.title}
+   792→                    </BreadcrumbPage>
+   793→                  </BreadcrumbItem>
+   794→                </BreadcrumbList>
+   795→              </Breadcrumb>
+   796→
+   797→              {/* ── Lesson header ───────────────────────── */}
+   798→              <motion.div
+   799→                initial={{ opacity: 0, y: 10 }}
+   800→                animate={{ opacity: 1, y: 0 }}
+   801→                transition={{ delay: 0.1, duration: 0.3 }}
+   802→                className="mb-8"
+   803→              >
+   804→                <div className="flex flex-wrap items-center gap-2 mb-3">
+   805→                  <Badge
+   806→                    variant="outline"
+   807→                    className="text-xs"
+   808→                    style={{
+   809→                      borderColor: `${levelColor}40`,
+   810→                      color: levelColor,
+   811→                    }}
+   812→                  >
+   813→                    {level.title}
+   814→                  </Badge>
+   815→                  <Badge variant="secondary" className="text-xs">
+   816→                    Lesson {lesson.order} of {mod.lessons.length}
+   817→                  </Badge>
+   818→                  {isCompleted && (
+   819→                    <Badge className="bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 text-xs">
+   820→                      <CheckCircle2 className="mr-1 h-3 w-3" />
+   821→                      Completed
+   822→                    </Badge>
+   823→                  )}
+   824→                </div>
+   825→                <h1 className="text-2xl font-extrabold tracking-tight sm:text-3xl lg:text-4xl">
+   826→                  {lesson.title}
+   827→                </h1>
+   828→                <p className="mt-2 text-muted-foreground">
+   829→                  Module: {mod.title} — {mod.description}
+   830→                </p>
+   831→              </motion.div>
+   832→
+   833→              {/* ── Notes panel ─────────────────────────── */}
+   834→              <AnimatePresence>
+   835→                {notesOpen && user && (
+   836→                  <motion.div
+   837→                    initial={{ opacity: 0, height: 0 }}
+   838→                    animate={{ opacity: 1, height: "auto" }}
+   839→                    exit={{ opacity: 0, height: 0 }}
+   840→                    className="mb-6"
+   841→                  >
+   842→                    <Card className="border-js-sky/20">
+   843→                      <CardContent className="pt-4 pb-4">
+   844→                        <div className="flex items-center justify-between mb-3">
+   845→                          <div className="flex items-center gap-2 text-sm font-semibold">
+   846→                            <StickyNote className="h-4 w-4 text-js-sky" />
+   847→                            My Notes
+   848→                          </div>
+   849→                          <div className="flex items-center gap-2">
+   850→                            {noteSaved && (
+   851→                              <span className="text-xs text-emerald-500">
+   852→                                Saved
+   853→                              </span>
+   854→                            )}
+   855→                            <Button
+   856→                              size="sm"
+   857→                              variant="outline"
+   858→                              className="h-7 text-xs gap-1"
+   859→                              onClick={saveNote}
+   860→                              disabled={savingNote}
+   861→                            >
+   862→                              {savingNote ? (
+   863→                                <Loader2 className="h-3 w-3 animate-spin" />
+   864→                              ) : (
+   865→                                <Check className="h-3 w-3" />
+   866→                              )}
+   867→                              Save
+   868→                            </Button>
+   869→                          </div>
+   870→                        </div>
+   871→                        <Textarea
+   872→                          value={noteContent}
+   873→                          onChange={(e) => setNoteContent(e.target.value)}
+   874→                          placeholder="Write your notes for this lesson..."
+   875→                          className="min-h-[100px] text-sm resize-y"
+   876→                        />
+   877→                      </CardContent>
+   878→                    </Card>
+   879→                  </motion.div>
+   880→                )}
+   881→              </AnimatePresence>
+   882→
+   883→              {/* ── Lesson content ──────────────────────── */}
+   884→              <motion.div
+   885→                initial={{ opacity: 0 }}
+   886→                animate={{ opacity: 1 }}
+   887→                transition={{ delay: 0.2, duration: 0.4 }}
+   888→                className="glass-card rounded-2xl p-5 sm:p-8"
+   889→              >
+   890→                {loadingProgress ? (
+   891→                  <div className="space-y-4">
+   892→                    <Skeleton className="h-8 w-3/4" />
+   893→                    <Skeleton className="h-4 w-full" />
+   894→                    <Skeleton className="h-4 w-full" />
+   895→                    <Skeleton className="h-4 w-5/6" />
+   896→                    <Skeleton className="h-32 w-full" />
+   897→                    <Skeleton className="h-4 w-full" />
+   898→                    <Skeleton className="h-4 w-4/5" />
+   899→                  </div>
+   900→                ) : (
+   901→                  <article className="prose-custom max-w-none">
+   902→                    <ReactMarkdown components={markdownComponents}>
+   903→                      {lesson.content}
+   904→                    </ReactMarkdown>
+   905→                  </article>
+   906→                )}
+   907→              </motion.div>
+   908→
+   909→              {/* ── Code Example (if separate) ────────────── */}
+   910→              {lesson.codeExample && (
+   911→                <motion.div
+   912→                  initial={{ opacity: 0, y: 12 }}
+   913→                  animate={{ opacity: 1, y: 0 }}
+   914→                  transition={{ delay: 0.3, duration: 0.3 }}
+   915→                  className="mt-8"
+   916→                >
+   917→                  <div className="mb-3 flex items-center gap-2">
+   918→                    <Play className="h-4 w-4 text-[#F7DF1E]" />
+   919→                    <h3 className="text-lg font-bold">Try It Yourself</h3>
+   920→                  </div>
+   921→                  <div className="rounded-xl border border-border/50 overflow-hidden">
+   922→                    <div className="flex items-center justify-between border-b border-border/50 bg-muted/40 px-4 py-2">
+   923→                      <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+   924→                        playground.js
+   925→                      </span>
+   926→                      <Button
+   927→                        size="sm"
+   928→                        variant="ghost"
+   929→                        className="h-7 gap-1.5 px-2 text-xs text-[#F7DF1E] hover:text-[#F7DF1E]/80"
+   930→                        onClick={handleRunInPlayground}
+   931→                      >
+   932→                        <Play className="h-3 w-3" />
+   933→                        Run
+   934→                      </Button>
+   935→                    </div>
+   936→                    <SyntaxHighlighter
+   937→                      language="javascript"
+   938→                      style={oneDark}
+   939→                      PreTag="div"
+   940→                      customStyle={{
+   941→                        margin: 0,
+   942→                        padding: "1.25rem",
+   943→                        fontSize: "0.85rem",
+   944→                        lineHeight: "1.65",
+   945→                        background: "#1a1a2e",
+   946→                      }}
+   947→                      codeTagProps={{ className: "code-editor" }}
+   948→                    >
+   949→                      {lesson.codeExample}
+   950→                    </SyntaxHighlighter>
+   951→                  </div>
+   952→                  <Button
+   953→                    className="mt-4 gap-2 bg-[#F7DF1E] text-[#1E293B] font-semibold hover:bg-[#F7DF1E]/90 shadow-[0_0_20px_rgba(247,223,30,0.2)] transition-shadow hover:shadow-[0_0_30px_rgba(247,223,30,0.35)]"
+   954→                    onClick={handleRunInPlayground}
+   955→                  >
+   956→                    <Play className="h-4 w-4" />
+   957→                    Open in Playground
+   958→                  </Button>
+   959→                </motion.div>
+   960→              )}
+   961→
+   962→              {/* ── Mark Complete ───────────────────────── */}
+   963→              <motion.div
+   964→                initial={{ opacity: 0, y: 10 }}
+   965→                animate={{ opacity: 1, y: 0 }}
+   966→                transition={{ delay: 0.32, duration: 0.3 }}
+   967→                className="mt-8 flex justify-center"
+   968→              >
+   969→                {!isCompleted && user ? (
+   970→                  <Button
+   971→                    onClick={handleMarkComplete}
+   972→                    disabled={completing}
+   973→                    className="gap-2 bg-emerald-500 hover:bg-emerald-600 text-white font-semibold px-8 shadow-lg shadow-emerald-500/20"
+   974→                  >
+   975→                    {completing ? (
+   976→                      <Loader2 className="h-4 w-4 animate-spin" />
+   977→                    ) : (
+   978→                      <CheckCircle2 className="h-4 w-4" />
+   979→                    )}
+   980→                    Mark Complete (+25 XP)
+   981→                  </Button>
+   982→                ) : isCompleted ? (
+   983→                  <Badge className="gap-1.5 bg-emerald-500/15 text-emerald-600 dark:text-emerald-400 border-emerald-500/30 px-4 py-2 text-sm">
+   984→                    <CheckCircle2 className="h-4 w-4" />
+   985→                    Lesson Completed
+   986→                  </Badge>
+   987→                ) : null}
+   988→              </motion.div>
+   989→
+   990→              {/* ── Navigation ──────────────────────────── */}
+   991→              <motion.div
+   992→                initial={{ opacity: 0, y: 10 }}
+   993→                animate={{ opacity: 1, y: 0 }}
+   994→                transition={{ delay: 0.35, duration: 0.3 }}
+   995→                className="mt-10 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between"
+   996→              >
+   997→                <Button
+   998→                  variant="outline"
+   999→                  className="gap-2"
+  1000→                  disabled={!prevLesson}
+  1001→                  onClick={() => prevLesson && goToLesson(prevLesson)}
+  1002→                >
+  1003→                  <ChevronLeft className="h-4 w-4" />
+  1004→                  <span className="hidden sm:inline">
+  1005→                    {prevLesson ? prevLesson.lesson.title : "Previous"}
+  1006→                  </span>
+  1007→                  <span className="sm:hidden">Previous</span>
+  1008→                </Button>
+  1009→
+  1010→                <div className="flex items-center gap-1 text-xs text-muted-foreground">
+  1011→                  {orderedIds.indexOf(lesson.id) + 1} of{" "}
+  1012→                  {orderedIds.length} lessons
+  1013→                </div>
+  1014→
+  1015→                <Button
+  1016→                  variant="outline"
+  1017→                  className="gap-2"
+  1018→                  disabled={!nextLesson}
+  1019→                  onClick={() => nextLesson && goToLesson(nextLesson)}
+  1020→                >
+  1021→                  <span className="hidden sm:inline">
+  1022→                    {nextLesson ? nextLesson.lesson.title : "Next"}
+  1023→                  </span>
+  1024→                  <span className="sm:hidden">Next</span>
+  1025→                  <ChevronRight className="h-4 w-4" />
+  1026→                </Button>
+  1027→              </motion.div>
+  1028→            </div>
+  1029→          </div>
+  1030→        </div>
+  1031→      </motion.section>
+  1032→    </AnimatePresence>
+  1033→  );
+  1034→}

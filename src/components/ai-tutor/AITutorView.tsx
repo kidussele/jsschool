@@ -6,8 +6,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { useAppStore } from "@/lib/store";
 import { useState, useRef, useEffect } from "react";
 import {
-  MessageCircle, Send, Bot, User, Sparkles, Code2,
-  Lightbulb, Trash2, Loader2, ArrowUp,
+  MessageCircle, Send, Bot, User, Sparkles,
+  Trash2, Loader2,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -28,7 +28,7 @@ const quickPrompts = [
 ];
 
 export function AITutorView() {
-  const { user, addXp } = useAppStore();
+  const { user } = useAppStore();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -59,7 +59,7 @@ export function AITutorView() {
     setIsLoading(true);
 
     try {
-      const res = await fetch("/api/ai-chat?XTransformPort=3000", {
+      const res = await fetch("/api/ai-chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -76,7 +76,6 @@ export function AITutorView() {
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, assistantMsg]);
-      addXp(5);
     } catch {
       const errorMsg: Message = {
         id: (Date.now() + 1).toString(),

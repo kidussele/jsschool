@@ -143,7 +143,7 @@ export function QuizTakeView() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             userId: user.id,
-            quizId: quiz.id,
+            quizId: quiz!.id,
             answers: JSON.stringify(answerMap),
             timeTaken: elapsedSeconds,
           }),

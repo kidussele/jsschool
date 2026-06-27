@@ -374,6 +374,10 @@ fizzBuzz(20);`,
 
 // Test
 console.log(flatten([1, [2, [3, [4]], 5]])); // [1, 2, 3, 4, 5]`,
+    testCases: [
+      { input: "[1, [2, [3, [4]], 5]]", expected: "[1,2,3,4,5]" },
+      { input: "[[1, 2], [3, 4], [5]]", expected: "[1,2,3,4,5]" },
+    ],
     solution: `function flatten(arr) {
   const result = [];
   for (const item of arr) {

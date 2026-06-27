@@ -254,15 +254,15 @@ export function SearchView() {
                         <p className="text-sm font-medium truncate">{item.title}</p>
                         {"level" in item && (
                           <p className="text-[11px] text-muted-foreground truncate">
-                            {(item as { level?: string; module?: string }).level}
-                            {(item as { level?: string; module?: string }).module
-                              ? ` / ${(item as { module: string }).module}`
+                            {(item as Record<string, unknown>).level as string}
+                            {(item as Record<string, unknown>).module as string
+                              ? ` / ${(item as Record<string, unknown>).module as string}`
                               : ""}
                           </p>
                         )}
                         {"difficulty" in item && (
                           <p className="text-[11px] text-muted-foreground capitalize">
-                            {(item as { difficulty?: string }).difficulty || ""}
+                            {((item as Record<string, unknown>).difficulty as string) || ""}
                           </p>
                         )}
                         {"description" in item && (

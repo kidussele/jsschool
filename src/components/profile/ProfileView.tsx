@@ -62,7 +62,7 @@ export function ProfileView() {
   useEffect(() => {
     if (user) {
       setEditName(user.name);
-      setEditBio((user as Record<string, unknown>).bio as string || "");
+      setEditBio((user as unknown as Record<string, unknown>)?.bio as string || "");
       setEditAvatar(user.avatar || "");
     }
   }, [user]);
@@ -338,7 +338,7 @@ export function ProfileView() {
                   onClick={() => {
                     setEditing(false);
                     setEditName(user.name);
-                    setEditBio((user as Record<string, unknown>).bio as string || "");
+                    setEditBio((user as unknown as Record<string, unknown>)?.bio as string || "");
                     setEditAvatar(user.avatar || "");
                     setProfileMsg("");
                   }}

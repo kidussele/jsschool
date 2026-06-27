@@ -14,9 +14,6 @@ export async function GET(
         user: { select: { id: true, name: true, avatar: true } },
         replies: {
           orderBy: { createdAt: "asc" },
-          include: {
-            user: { select: { id: true, name: true, avatar: true } },
-          },
         },
       },
     });
@@ -62,9 +59,6 @@ export async function PUT(
     const updated = await db.discussionPost.update({
       where: { id },
       data: updateData,
-      include: {
-        user: { select: { id: true, name: true, avatar: true } },
-      },
     });
 
     return NextResponse.json({ post: updated, message: "Post updated" });

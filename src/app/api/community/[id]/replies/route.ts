@@ -12,7 +12,8 @@ export async function GET(
       where: { postId: id },
       orderBy: { createdAt: "asc" },
       include: {
-        user: { select: { id: true, name: true, avatar: true } },
+      
+
       },
     });
 
@@ -49,7 +50,7 @@ export async function POST(
     const reply = await db.discussionReply.create({
       data: { postId: id, userId, content },
       include: {
-        user: { select: { id: true, name: true, avatar: true } },
+
       },
     });
 

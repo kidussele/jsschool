@@ -79,6 +79,7 @@ function ViewRouter() {
     search: <SearchView />,
     login: <LoginView />,
     register: <RegisterView />,
+    "challenge-detail": <ChallengesView />,
     home: null,
   };
 
