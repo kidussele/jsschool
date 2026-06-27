@@ -81,3 +81,84 @@ Stage Summary:
 - Seed endpoint works
 - Server binds to 0.0.0.0:3000 for network access
 - Server process tends to die after extended idle - environment limitation
+
+---
+Task ID: 3a
+Agent: Sub-agent
+Task: Create SVG educational diagrams component
+
+Work Log:
+- Created `/home/z/my-project/src/components/courses/LessonDiagrams.tsx`
+- Implemented `JSRuntimeDiagram`: vertical flow diagram (Browser → JS Engine → Memory Heap + Call Stack → Web APIs → Callback Queue → Event Loop → DOM Rendering) with themed rounded-rect boxes and connecting arrows
+- Implemented `EventLoopDiagram`: circular layout with 6 nodes (Call Stack, Web APIs, Microtasks, Callback Queue, Render, Next Tick) around a pulsing Event Loop center, curved arrows between nodes
+- Implemented `LessonDiagramRenderer`: takes `diagramId` string ("js-runtime" | "event-loop"), renders matching diagram or null fallback
+- All SVGs use `viewBox` + `width="100%"` for full responsiveness
+- Dark/light mode via `useTheme()` from next-themes — colors swap between dark navy and light slate palettes
+- Uses project branding colors: js-yellow, js-sky, js-violet, js-emerald, js-orange, js-rose
+- Fixed `textTransform` (not a valid SVG prop) → used inline style instead
+- Added `fillOpacity` prop to Box helper component
+- TypeScript passes cleanly for the new file (0 errors)
+
+Stage Summary:
+- 3 named exports: JSRuntimeDiagram, EventLoopDiagram, LessonDiagramRenderer
+- Professional, branded, responsive SVG diagrams ready for lesson content
+
+---
+Task ID: 3b
+Agent: Sub-agent
+Task: Enhance LessonView with rich markdown rendering, SVG diagrams, callouts, image viewer, and playground integration
+
+Work Log:
+- Added imports: LessonDiagramRenderer, Dialog/DialogContent/DialogTitle, Info/Lightbulb/AlertTriangle/AlertCircle/ZoomIn/ZoomOut/Download/X from lucide-react, mermaid, PlaygroundCodePayload type, CodeExample type
+- Created CalloutBlock component: detects GitHub-style alerts (> [!NOTE], > [!TIP], > [!WARNING], > [!IMPORTANT]) with colored left borders, icons, and type labels
+- Created MermaidBlock component: uses useId() for unique IDs, calls mermaid.render() in useEffect, renders SVG or error state, theme syncs with resolvedTheme
+- Created ImageViewerDialog component: full Dialog-based image viewer with zoom in/out, prev/next navigation, download button, close button, and zoom percentage display
+- Added extractImageUrls helper to parse markdown for image URLs
+- Converted static markdownComponents to factory function createMarkdownComponents() that accepts onTryIt, imageUrls, and onOpenImage callbacks
+- Enhanced blockquote renderer: detects [!TYPE] patterns and renders CalloutBlock instead of regular blockquote
+- Enhanced div renderer: checks for data-diagram attribute and renders LessonDiagramRenderer
+- Enhanced img renderer: wraps images in clickable container, opens ImageViewerDialog on click for tracked image URLs
+- Enhanced table: added zebra striping via `tr` renderer with `even:bg-muted/30` and sticky thead
+- Enhanced code renderer: detects `language-mermaid` blocks and renders MermaidBlock; passes onTryIt callback to CodeBlock for inline "Try It" button
+- Modified CodeBlock component: accepts optional onTryIt prop, renders "Try It" button in header bar alongside Copy
+- Enhanced "Try It Yourself" section: handleRunInPlayground now builds PlaygroundCodePayload (with html/css defaults, js code, title, lessonId, exampleId, description) and calls setPlaygroundPayload then navigateTo
+- Added support for lesson.codeExamples array (multiple examples) - each gets its own code block and "Open in Playground" button
+- Updated top bar "Run in Playground" button to trigger for both codeExample and codeExamples
+- All pre-existing functionality preserved: sidebar, breadcrumb, progress tracking, bookmarks, notes, timer, prev/next navigation
+
+TypeScript Fixes:
+- Cast mermaid.render svg output with `typeof renderedSvg === "string"` to handle `string | Blob` return type in mermaid v11
+- Cast img src with `String(props.src || "")` to handle React 19's `string | Blob` src type
+
+Stage Summary:
+- 0 new TypeScript errors (only pre-existing errors in examples/ and skills/ directories)
+- All 6 enhancement features implemented: callouts, SVG diagrams, image viewer, enhanced tables, inline Try It buttons, mermaid support
+- Playground integration fully wired: both inline code blocks and dedicated code example sections send proper payloads
+
+---
+Task ID: 4
+Agent: Main
+Task: Rebuild PlaygroundView with console, auto-save, find-replace, lesson integration
+
+Work Log:
+- Read current PlaygroundView.tsx (495 lines) and store.ts (PlaygroundCodePayload interface)
+- Rewrote entire PlaygroundView.tsx from 495→~1200 lines with all 9 new features
+- Added Console tab (4th tab) with color-coded messages (log=white, error=red, warn=yellow, info=blue), timestamps, unread badge, clear button
+- Injected console interceptor script before user code in iframe srcdoc to capture log/error/warn/info + onerror + unhandledrejection via postMessage
+- Added Lesson Context Banner: shows title/description from playgroundPayload with "Back to Lesson" button calling navigateTo("lesson")
+- Added auto-save to localStorage every 5s with key `js-hero-playground-{lessonId || "default"}`, with animated "Saved ✓" indicator near tabs
+- Added 3 new buttons: Download (downloads combined HTML file), Format (basic brace-indent formatter), Share (copies all code as combined snippet)
+- Added Find & Replace bar: toggleable with Ctrl+F/H, find/replace inputs, match count display, Replace/Replace All/Close buttons, animated show/hide
+- Added keyboard shortcuts: Ctrl+S (force save + prevent default), Ctrl+/ (toggle line comment on current line)
+- Enhanced reset behavior: "Reset Example" (resets to original lesson code) vs "Reset" (resets to DEFAULTS), clears localStorage
+- Added editor fullscreen toggle button (hides preview panel, keeps existing preview fullscreen)
+- Initialization flow: playgroundPayload → localStorage → DEFAULTS, with originalCode tracking for lesson reset
+- Fixed TypeScript error: `as const` DEFAULTS caused literal type assignment issues, fixed with explicit `string` typing
+- Cleaned up 6 unused eslint-disable directives
+
+Stage Summary:
+- 0 new TypeScript errors in PlaygroundView.tsx
+- 0 ESLint errors/warnings in PlaygroundView.tsx
+- All existing visual styles preserved: bg-js-darker, bg-js-yellow, Framer Motion animations, CodeTextarea with line numbers, browser dots preview, shadcn/ui components
+- TabKey type extended: "html" | "css" | "js" | "console"
+- Console messages received via window.addEventListener("message") routed by event.data.type === "console"

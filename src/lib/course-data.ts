@@ -16,12 +16,22 @@ export interface CourseModule {
   lessons: CourseLesson[];
 }
 
+export interface CodeExample {
+  id: string;
+  title: string;
+  js: string;
+  html?: string;
+  css?: string;
+  description?: string;
+}
+
 export interface CourseLesson {
   id: string;
   title: string;
   order: number;
   content: string;
   codeExample?: string;
+  codeExamples?: CodeExample[];
 }
 
 export const courseData: CourseLevel[] = [
@@ -89,19 +99,7 @@ Understanding the JavaScript runtime is key to becoming a better developer.
 
 ## The JavaScript Runtime
 
-\`\`\`
-┌─────────────────────────────────┐
-│       JavaScript Runtime         │
-│  ┌───────────┐  ┌────────────┐  │
-│  │  Memory   │  │   Call     │  │
-│  │  Heap     │  │   Stack    │  │
-│  └───────────┘  └────────────┘  │
-│  ┌───────────────────────────┐  │
-│  │      Web APIs             │  │
-│  │  DOM, Timer, Fetch, etc.  │  │
-│  └───────────────────────────┘  │
-└─────────────────────────────────┘
-\`\`\`
+<div className="js-runtime-diagram" data-diagram="js-runtime"></div>
 
 ## Call Stack
 
@@ -129,12 +127,10 @@ first();
 
 JavaScript is **single-threaded** but non-blocking thanks to the event loop:
 
-1. **Synchronous code** runs first (call stack)
-2. **Web APIs** handle async operations (setTimeout, fetch)
-3. **Callback Queue** stores waiting callbacks
-4. **Event Loop** moves callbacks to the stack when it's empty
+<div className="event-loop-diagram" data-diagram="event-loop"></div>
 
-> **Key Insight:** This is why JavaScript can handle many tasks despite being single-threaded!`,
+> [!NOTE]
+> This is why JavaScript can handle many tasks despite being single-threaded! The event loop continuously checks if the call stack is empty, and if there are pending callbacks in the queue, it pushes the next one onto the stack.`,
             codeExample: `// Synchronous execution\nconsole.log("1 - Start");\nconsole.log("2 - Middle");\nconsole.log("3 - End");\n\n// Asynchronous with callback\nconsole.log("1 - Start");\nsetTimeout(() => {\n  console.log("3 - This runs later!");\n}, 1000);\nconsole.log("2 - This runs next");\n\n// The event loop allows "2" to print before "3"\n// even though setTimeout was called first!`,
           },
           {

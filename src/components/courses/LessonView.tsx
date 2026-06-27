@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useCallback, useState, useEffect, useRef } from "react";
+import { useMemo, useCallback, useState, useEffect, useRef, useId, type ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useTheme } from "next-themes";
 import ReactMarkdown from "react-markdown";
@@ -24,6 +24,14 @@ import {
   PanelLeftOpen,
   Clock,
   StickyNote,
+  Info,
+  Lightbulb,
+  AlertTriangle,
+  AlertCircle,
+  ZoomIn,
+  ZoomOut,
+  Download,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -38,14 +46,31 @@ import {
   BreadcrumbPage,
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb";
-import { useAppStore } from "@/lib/store";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { useAppStore, type PlaygroundCodePayload } from "@/lib/store";
 import {
   courseData,
   type CourseLevel,
   type CourseModule,
   type CourseLesson,
+  type CodeExample,
 } from "@/lib/course-data";
+import { LessonDiagramRenderer } from "@/components/courses/LessonDiagrams";
 import { cn } from "@/lib/utils";
+import mermaid from "mermaid";
+
+// ── Playground defaults (mirrors PlaygroundView) ────────────
+const DEFAULT_HTML = `<div id="output">
+  <h1 style="color: #F7DF1E">Hello, Hero!</h1>
+  <p>Start coding here...</p>
+</div>`;
+
+const DEFAULT_CSS = `body {
+  font-family: system-ui, sans-serif;
+  padding: 20px;
+  background: #0F172A;
+  color: white;
+}`;
 
 // ── Types ────────────────────────────────────────────────────
 interface LessonProgress {
@@ -110,12 +135,131 @@ function buildOrderedLessonIds(): {
 const lessonMap = buildLessonMap();
 const { ids: orderedIds, data: orderedLessons } = buildOrderedLessonIds();
 
+// ── Callout Block ─────────────────────────────────────────────
+const CALLOUT_TYPES = {
+  NOTE: {
+    label: "Note",
+    border: "border-l-[#38BDF8]",
+    bg: "bg-[#38BDF8]/5",
+    icon: Info,
+    iconColor: "text-[#38BDF8]",
+  },
+  TIP: {
+    label: "Tip",
+    border: "border-l-[#10B981]",
+    bg: "bg-[#10B981]/5",
+    icon: Lightbulb,
+    iconColor: "text-[#10B981]",
+  },
+  WARNING: {
+    label: "Warning",
+    border: "border-l-[#F7DF1E]",
+    bg: "bg-[#F7DF1E]/5",
+    icon: AlertTriangle,
+    iconColor: "text-[#F7DF1E]",
+  },
+  IMPORTANT: {
+    label: "Important",
+    border: "border-l-[#F43F5E]",
+    bg: "bg-[#F43F5E]/5",
+    icon: AlertCircle,
+    iconColor: "text-[#F43F5E]",
+  },
+} as const;
+
+type CalloutKey = keyof typeof CALLOUT_TYPES;
+
+function CalloutBlock({
+  type,
+  children,
+}: {
+  type: CalloutKey;
+  children: ReactNode;
+}) {
+  const config = CALLOUT_TYPES[type];
+  const Icon = config.icon;
+  return (
+    <div
+      className={cn(
+        "my-4 rounded-r-lg border-l-4 py-3 pl-4 pr-4",
+        config.border,
+        config.bg
+      )}
+    >
+      <div className={cn("mb-1.5 flex items-center gap-2 text-sm font-semibold", config.iconColor)}>
+        <Icon className="h-4 w-4" />
+        {config.label}
+      </div>
+      <div className="text-foreground/85 leading-relaxed text-sm">{children}</div>
+    </div>
+  );
+}
+
+// ── Mermaid Block ─────────────────────────────────────────────
+mermaid.initialize({ startOnLoad: false, theme: "dark" });
+
+function MermaidBlock({ code }: { code: string }) {
+  const uniqueId = useId().replace(/:/g, "m");
+  const [svg, setSvg] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function renderMermaid() {
+      try {
+        const { svg: renderedSvg } = await mermaid.render(`mermaid-${uniqueId}`, code);
+        if (!cancelled) {
+          setSvg(typeof renderedSvg === "string" ? renderedSvg : "");
+          setError(null);
+        }
+      } catch (e) {
+        if (!cancelled) {
+          setError(e instanceof Error ? e.message : "Failed to render diagram");
+          setSvg("");
+        }
+      }
+    }
+    renderMermaid();
+    return () => {
+      cancelled = true;
+    };
+  }, [code, uniqueId]);
+
+  if (error) {
+    return (
+      <div className="my-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4 text-sm text-destructive">
+        <p className="font-medium mb-1">Diagram Error</p>
+        <pre className="text-xs opacity-80 whitespace-pre-wrap">{error}</pre>
+      </div>
+    );
+  }
+
+  if (!svg) {
+    return (
+      <div className="my-4 flex items-center justify-center rounded-lg border border-border/50 bg-muted/20 p-8">
+        <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="my-4 overflow-x-auto rounded-lg border border-border/50 bg-card/50 p-4 [&>svg]:max-w-full [&>svg]:h-auto [&>svg]:mx-auto"
+      dangerouslySetInnerHTML={{ __html: svg }}
+    />
+  );
+}
+
 // ── Code block renderer ──────────────────────────────────────
 function CodeBlock({
   className,
   children,
+  onTryIt,
   ...props
-}: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
+}: React.HTMLAttributes<HTMLElement> & {
+  children?: React.ReactNode;
+  onTryIt?: () => void;
+}) {
   const { resolvedTheme } = useTheme();
   const isDark = resolvedTheme === "dark";
   const [copied, setCopied] = useState(false);
@@ -139,24 +283,37 @@ function CodeBlock({
             {lang}
           </span>
         </div>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-7 gap-1.5 px-2 text-xs text-muted-foreground opacity-0 transition-opacity group-hover/code:opacity-100"
-          onClick={handleCopy}
-        >
-          {copied ? (
-            <>
-              <Check className="h-3 w-3 text-emerald-500" />
-              Copied
-            </>
-          ) : (
-            <>
-              <Copy className="h-3 w-3" />
-              Copy
-            </>
+        <div className="flex items-center gap-1">
+          {onTryIt && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-7 gap-1.5 px-2 text-xs text-[#F7DF1E] hover:text-[#F7DF1E]/80 opacity-0 transition-opacity group-hover/code:opacity-100"
+              onClick={onTryIt}
+            >
+              <Play className="h-3 w-3" />
+              Try It
+            </Button>
           )}
-        </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 gap-1.5 px-2 text-xs text-muted-foreground opacity-0 transition-opacity group-hover/code:opacity-100"
+            onClick={handleCopy}
+          >
+            {copied ? (
+              <>
+                <Check className="h-3 w-3 text-emerald-500" />
+                Copied
+              </>
+            ) : (
+              <>
+                <Copy className="h-3 w-3" />
+                Copy
+              </>
+            )}
+          </Button>
+        </div>
       </div>
       <SyntaxHighlighter
         language={lang}
@@ -180,99 +337,355 @@ function CodeBlock({
   );
 }
 
-// ── Markdown components override ──────────────────────────────
-const markdownComponents = {
-  h1: (props: React.HTMLAttributes<HTMLHeadingElement>) => (
-    <h1
-      className="mb-4 mt-8 text-2xl font-extrabold tracking-tight sm:text-3xl first:mt-0"
-      {...props}
-    />
-  ),
-  h2: (props: React.HTMLAttributes<HTMLHeadingElement>) => (
-    <h2
-      className="mb-3 mt-7 flex items-center gap-2 text-xl font-bold sm:text-2xl"
-      {...props}
-    />
-  ),
-  h3: (props: React.HTMLAttributes<HTMLHeadingElement>) => (
-    <h3 className="mb-2 mt-5 text-lg font-semibold" {...props} />
-  ),
-  p: (props: React.HTMLAttributes<HTMLParagraphElement>) => (
-    <p className="mb-4 leading-relaxed text-foreground/90" {...props} />
-  ),
-  ul: (props: React.HTMLAttributes<HTMLUListElement>) => (
-    <ul className="mb-4 list-disc space-y-1.5 pl-6" {...props} />
-  ),
-  ol: (props: React.HTMLAttributes<HTMLOListElement>) => (
-    <ol className="mb-4 list-decimal space-y-1.5 pl-6" {...props} />
-  ),
-  li: (props: React.HTMLAttributes<HTMLLIElement>) => (
-    <li className="text-foreground/85 leading-relaxed" {...props} />
-  ),
-  strong: (props: React.HTMLAttributes<HTMLElement>) => (
-    <strong className="font-bold text-foreground" {...props} />
-  ),
-  em: (props: React.HTMLAttributes<HTMLElement>) => (
-    <em className="italic text-foreground/80" {...props} />
-  ),
-  a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-    <a
-      className="font-medium text-[#F7DF1E] underline decoration-[#F7DF1E]/40 underline-offset-4 transition-colors hover:text-[#F7DF1E]/80 hover:decoration-[#F7DF1E]/60"
-      target="_blank"
-      rel="noopener noreferrer"
-      {...props}
-    />
-  ),
-  blockquote: (props: React.HTMLAttributes<HTMLQuoteElement>) => (
-    <blockquote
-      className="my-4 border-l-4 border-[#F7DF1E]/50 bg-[#F7DF1E]/5 py-3 pl-4 pr-4 rounded-r-lg italic text-foreground/80"
-      {...props}
-    />
-  ),
-  table: (props: React.HTMLAttributes<HTMLTableElement>) => (
-    <div className="my-4 overflow-x-auto rounded-lg border border-border/50">
-      <table className="w-full text-sm" {...props} />
-    </div>
-  ),
-  thead: (props: React.HTMLAttributes<HTMLTableSectionElement>) => (
-    <thead className="border-b border-border/50 bg-muted/30" {...props} />
-  ),
-  th: (props: React.HTMLAttributes<HTMLTableCellElement>) => (
-    <th
-      className="px-4 py-2.5 text-left font-semibold text-foreground/80"
-      {...props}
-    />
-  ),
-  td: (props: React.HTMLAttributes<HTMLTableCellElement>) => (
-    <td className="border-t border-border/30 px-4 py-2" {...props} />
-  ),
-  hr: () => <hr className="my-6 border-border/30" />,
-  code: ({
-    className,
-    children,
-    ...props
-  }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) => {
-    if (className && /language-/.test(className)) {
-      return <CodeBlock className={className} {...props}>{children}</CodeBlock>;
-    }
-    return (
-      <code
-        className="rounded-md bg-muted/60 px-1.5 py-0.5 text-[0.85em] font-mono text-foreground/90 border border-border/30"
+// ── Image Viewer Dialog ───────────────────────────────────────
+function ImageViewerDialog({
+  images,
+  currentIndex,
+  onClose,
+  onNavigate,
+}: {
+  images: string[];
+  currentIndex: number;
+  onClose: () => void;
+  onNavigate: (index: number) => void;
+}) {
+  const [zoom, setZoom] = useState(1);
+  const currentSrc = images[currentIndex];
+
+  const handleZoomIn = () => setZoom((z) => Math.min(z + 0.25, 3));
+  const handleZoomOut = () => setZoom((z) => Math.max(z - 0.25, 0.5));
+  const handlePrev = () => {
+    if (currentIndex > 0) { setZoom(1); onNavigate(currentIndex - 1); }
+  };
+  const handleNext = () => {
+    if (currentIndex < images.length - 1) { setZoom(1); onNavigate(currentIndex + 1); }
+  };
+  const handleDownload = () => {
+    const a = document.createElement("a");
+    a.href = currentSrc;
+    a.download = "";
+    a.target = "_blank";
+    a.click();
+  };
+
+  return (
+    <Dialog open onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-5xl w-[95vw] h-[85vh] flex flex-col p-0 gap-0 bg-background/95 backdrop-blur-xl border-border/50">
+        <DialogTitle className="sr-only">Image Viewer</DialogTitle>
+        {/* Toolbar */}
+        <div className="flex items-center justify-between border-b border-border/50 px-4 py-2.5 shrink-0">
+          <span className="text-xs text-muted-foreground">
+            {currentIndex + 1} / {images.length}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={handleZoomOut}
+              disabled={zoom <= 0.5}
+              title="Zoom out"
+            >
+              <ZoomOut className="h-4 w-4" />
+            </Button>
+            <span className="text-xs text-muted-foreground w-12 text-center tabular-nums">
+              {Math.round(zoom * 100)}%
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={handleZoomIn}
+              disabled={zoom >= 3}
+              title="Zoom in"
+            >
+              <ZoomIn className="h-4 w-4" />
+            </Button>
+            <div className="w-px h-5 bg-border/50 mx-1" />
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-8 w-8 p-0"
+              onClick={handleDownload}
+              title="Download"
+            >
+              <Download className="h-4 w-4" />
+            </Button>
+          </div>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            onClick={onClose}
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+        {/* Image area */}
+        <div className="flex-1 overflow-auto flex items-center justify-center bg-black/5 relative">
+          {images.length > 1 && currentIndex > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="absolute left-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-background/80 border border-border/50 shadow-lg z-10"
+              onClick={handlePrev}
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </Button>
+          )}
+          <img
+            src={currentSrc}
+            alt=""
+            className="max-w-full object-contain transition-transform duration-200"
+            style={{ transform: `scale(${zoom})` }}
+          />
+          {images.length > 1 && currentIndex < images.length - 1 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className="absolute right-3 top-1/2 -translate-y-1/2 h-10 w-10 rounded-full bg-background/80 border border-border/50 shadow-lg z-10"
+              onClick={handleNext}
+            >
+              <ChevronRight className="h-5 w-5" />
+            </Button>
+          )}
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Extract image URLs from markdown content ──────────────────
+function extractImageUrls(markdown: string): string[] {
+  const regex = /!\[([^\]]*)\]\(([^)]+)\)/g;
+  const urls: string[] = [];
+  let match: RegExpExecArray | null;
+  while ((match = regex.exec(markdown)) !== null) {
+    urls.push(match[2]);
+  }
+  return urls;
+}
+
+// ── Markdown components factory ──────────────────────────────
+function createMarkdownComponents(opts: {
+  onTryIt: (code: string) => void;
+  imageUrls: string[];
+  onOpenImage: (url: string) => void;
+}) {
+  const { onTryIt, imageUrls, onOpenImage } = opts;
+
+  return {
+    h1: (props: React.HTMLAttributes<HTMLHeadingElement>) => (
+      <h1
+        className="mb-4 mt-8 text-2xl font-extrabold tracking-tight sm:text-3xl first:mt-0"
         {...props}
-      >
-        {children}
-      </code>
-    );
-  },
-  pre: (props: React.HTMLAttributes<HTMLPreElement>) => {
-    return <>{props.children}</>;
-  },
-};
+      />
+    ),
+    h2: (props: React.HTMLAttributes<HTMLHeadingElement>) => (
+      <h2
+        className="mb-3 mt-7 flex items-center gap-2 text-xl font-bold sm:text-2xl"
+        {...props}
+      />
+    ),
+    h3: (props: React.HTMLAttributes<HTMLHeadingElement>) => (
+      <h3 className="mb-2 mt-5 text-lg font-semibold" {...props} />
+    ),
+    p: (props: React.HTMLAttributes<HTMLParagraphElement>) => (
+      <p className="mb-4 leading-relaxed text-foreground/90" {...props} />
+    ),
+    ul: (props: React.HTMLAttributes<HTMLUListElement>) => (
+      <ul className="mb-4 list-disc space-y-1.5 pl-6" {...props} />
+    ),
+    ol: (props: React.HTMLAttributes<HTMLOListElement>) => (
+      <ol className="mb-4 list-decimal space-y-1.5 pl-6" {...props} />
+    ),
+    li: (props: React.HTMLAttributes<HTMLLIElement>) => (
+      <li className="text-foreground/85 leading-relaxed" {...props} />
+    ),
+    strong: (props: React.HTMLAttributes<HTMLElement>) => (
+      <strong className="font-bold text-foreground" {...props} />
+    ),
+    em: (props: React.HTMLAttributes<HTMLElement>) => (
+      <em className="italic text-foreground/80" {...props} />
+    ),
+    a: (props: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+      <a
+        className="font-medium text-[#F7DF1E] underline decoration-[#F7DF1E]/40 underline-offset-4 transition-colors hover:text-[#F7DF1E]/80 hover:decoration-[#F7DF1E]/60"
+        target="_blank"
+        rel="noopener noreferrer"
+        {...props}
+      />
+    ),
+
+    // ── Blockquote / Callout ───────────────────────────────
+    blockquote: ({
+      children,
+      ...props
+    }: React.HTMLAttributes<HTMLQuoteElement> & { children?: ReactNode }) => {
+      // Detect GitHub-style alert: > [!NOTE], > [!TIP], etc.
+      const childArr = Array.isArray(children) ? children : [children];
+      let firstText = "";
+      for (const c of childArr) {
+        if (typeof c === "string") {
+          firstText = c.trim();
+          break;
+        }
+        if (c && typeof c === "object" && "props" in c) {
+          const pChildren = (c.props as { children?: ReactNode }).children;
+          if (typeof pChildren === "string") {
+            firstText = pChildren.trim();
+            break;
+          }
+          if (Array.isArray(pChildren)) {
+            for (const pc of pChildren) {
+              if (typeof pc === "string") {
+                firstText = pc.trim();
+                break;
+              }
+            }
+            if (firstText) break;
+          }
+        }
+      }
+
+      const alertMatch = firstText.match(/^\[!(NOTE|TIP|WARNING|IMPORTANT)\]\s*/);
+      if (alertMatch) {
+        const calloutType = alertMatch[1] as CalloutKey;
+        // Filter out the [!TYPE] line from the rendered children
+        const filteredChildren = childArr.map((c) => {
+          if (c && typeof c === "object" && "props" in c) {
+            const pProps = c.props as { children?: ReactNode; className?: string };
+            const pChildren = pProps.children;
+            if (typeof pChildren === "string") {
+              const cleaned = pChildren.replace(/^\[!(NOTE|TIP|WARNING|IMPORTANT)\]\s*/, "");
+              if (!cleaned) return null;
+              return { ...c, props: { ...pProps, children: cleaned } };
+            }
+          }
+          return c;
+        }).filter(Boolean);
+        return <CalloutBlock type={calloutType}>{filteredChildren}</CalloutBlock>;
+      }
+
+      // Regular blockquote (existing yellow styling)
+      return (
+        <blockquote
+          className="my-4 border-l-4 border-[#F7DF1E]/50 bg-[#F7DF1E]/5 py-3 pl-4 pr-4 rounded-r-lg italic text-foreground/80"
+          {...props}
+        >
+          {children}
+        </blockquote>
+      );
+    },
+
+    // ── Table with zebra striping ─────────────────────────
+    table: (props: React.HTMLAttributes<HTMLTableElement>) => (
+      <div className="my-4 overflow-x-auto rounded-lg border border-border/50">
+        <table className="w-full text-sm" {...props} />
+      </div>
+    ),
+    thead: (props: React.HTMLAttributes<HTMLTableSectionElement>) => (
+      <thead className="border-b border-border/50 bg-muted/30 sticky top-0" {...props} />
+    ),
+    th: (props: React.HTMLAttributes<HTMLTableCellElement>) => (
+      <th
+        className="px-4 py-2.5 text-left font-semibold text-foreground/80"
+        {...props}
+      />
+    ),
+    td: (props: React.HTMLAttributes<HTMLTableCellElement>) => (
+      <td className="border-t border-border/30 px-4 py-2" {...props} />
+    ),
+    tr: (props: React.HTMLAttributes<HTMLTableRowElement>) => (
+      <tr className="even:bg-muted/30" {...props} />
+    ),
+    hr: () => <hr className="my-6 border-border/30" />,
+
+    // ── Code blocks (with Try It button & Mermaid support) ─
+    code: ({
+      className,
+      children,
+      ...props
+    }: React.HTMLAttributes<HTMLElement> & { children?: ReactNode }) => {
+      if (className && /language-/.test(className)) {
+        const match = /language-(\w+)/.exec(className || "");
+        const lang = match ? match[1] : "";
+        const code = String(children).replace(/\n$/, "");
+
+        // Mermaid diagram
+        if (lang === "mermaid") {
+          return <MermaidBlock code={code} />;
+        }
+
+        // Regular code block with Try It button
+        return (
+          <CodeBlock
+            className={className}
+            onTryIt={() => onTryIt(code)}
+            {...props}
+          >
+            {children}
+          </CodeBlock>
+        );
+      }
+      return (
+        <code
+          className="rounded-md bg-muted/60 px-1.5 py-0.5 text-[0.85em] font-mono text-foreground/90 border border-border/30"
+          {...props}
+        >
+          {children}
+        </code>
+      );
+    },
+
+    // ── Div (diagram renderer) ────────────────────────────
+    div: (props: React.HTMLAttributes<HTMLDivElement>) => {
+      if (props["data-diagram"]) {
+        return <LessonDiagramRenderer diagramId={props["data-diagram"] as string} />;
+      }
+      return <div {...props} />;
+    },
+
+    // ── Image (clickable viewer) ──────────────────────────
+    img: (props: React.ImgHTMLAttributes<HTMLImageElement>) => {
+      const src = String(props.src || "");
+      const isClickable = imageUrls.includes(src);
+      return (
+        <span
+          className={cn(
+            "my-4 block overflow-hidden rounded-lg border border-border/30",
+            isClickable && "cursor-pointer hover:border-[#F7DF1E]/50 transition-colors"
+          )}
+          onClick={() => isClickable && onOpenImage(String(props.src || ""))}
+        >
+          <img
+            src={src}
+            alt={props.alt || ""}
+            className="max-w-full h-auto"
+            loading="lazy"
+          />
+        </span>
+      );
+    },
+
+    pre: (props: React.HTMLAttributes<HTMLPreElement>) => {
+      return <>{props.children}</>;
+    },
+  };
+}
 
 // ── Component ────────────────────────────────────────────────────
 export function LessonView() {
-  const { user, currentLesson, navigateTo, setCurrentLesson, setCurrentView, setUser } =
-    useAppStore();
+  const {
+    user,
+    currentLesson,
+    navigateTo,
+    setCurrentLesson,
+    setCurrentView,
+    setUser,
+    setPlaygroundPayload,
+  } = useAppStore();
+  const { resolvedTheme } = useTheme();
 
   // UI state
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -280,6 +693,10 @@ export function LessonView() {
   const [noteContent, setNoteContent] = useState("");
   const [savingNote, setSavingNote] = useState(false);
   const [noteSaved, setNoteSaved] = useState(false);
+
+  // Image viewer state
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerIndex, setViewerIndex] = useState(0);
 
   // Backend state
   const [progressList, setProgressList] = useState<LessonProgress[]>([]);
@@ -310,6 +727,58 @@ export function LessonView() {
       idx < orderedLessons.length - 1 ? orderedLessons[idx + 1] ?? null : null;
     return { prevLesson: prev, nextLesson: next };
   }, [currentLesson]);
+
+  // Extract image URLs from lesson content
+  const imageUrls = useMemo(() => {
+    if (!lessonData) return [];
+    return extractImageUrls(lessonData.lesson.content);
+  }, [lessonData]);
+
+  // Create Try It callback for inline code blocks
+  const handleInlineTryIt = useCallback(
+    (code: string) => {
+      if (!lessonData) return;
+      const payload: PlaygroundCodePayload = {
+        html: DEFAULT_HTML,
+        css: DEFAULT_CSS,
+        js: code,
+        title: lessonData.lesson.title,
+        lessonId: lessonData.lesson.id,
+      };
+      setPlaygroundPayload(payload);
+      navigateTo("playground");
+    },
+    [lessonData, setPlaygroundPayload, navigateTo]
+  );
+
+  // Open image viewer
+  const handleOpenImage = useCallback(
+    (url: string) => {
+      const idx = imageUrls.indexOf(url);
+      setViewerIndex(idx >= 0 ? idx : 0);
+      setViewerOpen(true);
+    },
+    [imageUrls]
+  );
+
+  // Build markdown components with lesson context
+  const markdownComponents = useMemo(
+    () =>
+      createMarkdownComponents({
+        onTryIt: handleInlineTryIt,
+        imageUrls,
+        onOpenImage: handleOpenImage,
+      }),
+    [handleInlineTryIt, imageUrls, handleOpenImage]
+  );
+
+  // Sync mermaid theme with resolved theme
+  useEffect(() => {
+    mermaid.initialize({
+      startOnLoad: false,
+      theme: resolvedTheme === "dark" ? "dark" : "default",
+    });
+  }, [resolvedTheme]);
 
   // ── Fetch progress, bookmarks, notes on mount / lesson change ──
   useEffect(() => {
@@ -421,7 +890,7 @@ export function LessonView() {
         }
       }
     };
-  }, [currentLesson, user]);
+  }, [currentLesson, user, isCompleted]);
 
   // ── Actions ────────────────────────────────────────────────
   const saveNote = useCallback(async () => {
@@ -545,9 +1014,23 @@ export function LessonView() {
     [setCurrentLesson]
   );
 
-  const handleRunInPlayground = useCallback(() => {
-    navigateTo("playground");
-  }, [navigateTo]);
+  const handleRunInPlayground = useCallback(
+    (example?: CodeExample) => {
+      if (!lessonData) return;
+      const payload: PlaygroundCodePayload = {
+        html: example?.html || DEFAULT_HTML,
+        css: example?.css || DEFAULT_CSS,
+        js: example?.js || lessonData.lesson.codeExample || "",
+        title: lessonData.lesson.title,
+        lessonId: lessonData.lesson.id,
+        exampleId: example?.id,
+        description: example?.description,
+      };
+      setPlaygroundPayload(payload);
+      navigateTo("playground");
+    },
+    [lessonData, setPlaygroundPayload, navigateTo]
+  );
 
   const handleBackToCourses = useCallback(() => {
     setCurrentView("courses");
@@ -591,6 +1074,9 @@ export function LessonView() {
   // Build completed lesson IDs set for sidebar
   const completedIds = new Set(progressList.filter((p) => p.status === "completed").map((p) => p.lessonId));
 
+  // Determine if lesson has any code examples (single or multiple)
+  const hasCodeExamples = !!(lesson.codeExample || (lesson.codeExamples && lesson.codeExamples.length > 0));
+
   return (
     <AnimatePresence mode="wait">
       <motion.section
@@ -609,6 +1095,16 @@ export function LessonView() {
           />
           <div className="absolute -right-32 bottom-20 h-80 w-80 rounded-full bg-[#F7DF1E]/[0.04] blur-3xl" />
         </div>
+
+        {/* Image Viewer Dialog */}
+        {viewerOpen && imageUrls.length > 0 && (
+          <ImageViewerDialog
+            images={imageUrls}
+            currentIndex={viewerIndex}
+            onClose={() => setViewerOpen(false)}
+            onNavigate={setViewerIndex}
+          />
+        )}
 
         <div className="relative z-10 flex">
           {/* ── Sidebar (lesson list) ──────────────────────── */}
@@ -752,9 +1248,9 @@ export function LessonView() {
                     <span className="hidden sm:inline text-xs">Notes</span>
                   </Button>
 
-                  {lesson.codeExample && (
+                  {hasCodeExamples && (
                     <Button
-                      onClick={handleRunInPlayground}
+                      onClick={() => handleRunInPlayground()}
                       className="gap-2 bg-[#F7DF1E] text-[#1E293B] font-semibold hover:bg-[#F7DF1E]/90 shadow-[0_0_20px_rgba(247,223,30,0.2)] transition-shadow hover:shadow-[0_0_30px_rgba(247,223,30,0.35)]"
                     >
                       <Play className="h-4 w-4" />
@@ -906,8 +1402,76 @@ export function LessonView() {
                 )}
               </motion.div>
 
-              {/* ── Code Example (if separate) ────────────── */}
-              {lesson.codeExample && (
+              {/* ── Code Examples (Try It Yourself) ──────── */}
+              {/* Multiple codeExamples array */}
+              {lesson.codeExamples && lesson.codeExamples.length > 0 && (
+                <motion.div
+                  initial={{ opacity: 0, y: 12 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: 0.3, duration: 0.3 }}
+                  className="mt-8 space-y-6"
+                >
+                  <div className="flex items-center gap-2">
+                    <Play className="h-4 w-4 text-[#F7DF1E]" />
+                    <h3 className="text-lg font-bold">Try It Yourself</h3>
+                  </div>
+                  {lesson.codeExamples.map((example) => (
+                    <div key={example.id}>
+                      {example.title && (
+                        <p className="text-sm text-muted-foreground mb-2 font-medium">
+                          {example.title}
+                        </p>
+                      )}
+                      {example.description && (
+                        <p className="text-sm text-muted-foreground/80 mb-3">
+                          {example.description}
+                        </p>
+                      )}
+                      <div className="rounded-xl border border-border/50 overflow-hidden">
+                        <div className="flex items-center justify-between border-b border-border/50 bg-muted/40 px-4 py-2">
+                          <span className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                            playground.js
+                          </span>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-7 gap-1.5 px-2 text-xs text-[#F7DF1E] hover:text-[#F7DF1E]/80"
+                            onClick={() => handleRunInPlayground(example)}
+                          >
+                            <Play className="h-3 w-3" />
+                            Run
+                          </Button>
+                        </div>
+                        <SyntaxHighlighter
+                          language="javascript"
+                          style={oneDark}
+                          PreTag="div"
+                          customStyle={{
+                            margin: 0,
+                            padding: "1.25rem",
+                            fontSize: "0.85rem",
+                            lineHeight: "1.65",
+                            background: "#1a1a2e",
+                          }}
+                          codeTagProps={{ className: "code-editor" }}
+                        >
+                          {example.js}
+                        </SyntaxHighlighter>
+                      </div>
+                      <Button
+                        className="mt-3 gap-2 bg-[#F7DF1E] text-[#1E293B] font-semibold hover:bg-[#F7DF1E]/90 shadow-[0_0_20px_rgba(247,223,30,0.2)] transition-shadow hover:shadow-[0_0_30px_rgba(247,223,30,0.35)]"
+                        onClick={() => handleRunInPlayground(example)}
+                      >
+                        <Play className="h-4 w-4" />
+                        Open in Playground
+                      </Button>
+                    </div>
+                  ))}
+                </motion.div>
+              )}
+
+              {/* Single codeExample string (legacy, no codeExamples array) */}
+              {!lesson.codeExamples && lesson.codeExample && (
                 <motion.div
                   initial={{ opacity: 0, y: 12 }}
                   animate={{ opacity: 1, y: 0 }}
@@ -927,7 +1491,7 @@ export function LessonView() {
                         size="sm"
                         variant="ghost"
                         className="h-7 gap-1.5 px-2 text-xs text-[#F7DF1E] hover:text-[#F7DF1E]/80"
-                        onClick={handleRunInPlayground}
+                        onClick={() => handleRunInPlayground()}
                       >
                         <Play className="h-3 w-3" />
                         Run
@@ -951,7 +1515,7 @@ export function LessonView() {
                   </div>
                   <Button
                     className="mt-4 gap-2 bg-[#F7DF1E] text-[#1E293B] font-semibold hover:bg-[#F7DF1E]/90 shadow-[0_0_20px_rgba(247,223,30,0.2)] transition-shadow hover:shadow-[0_0_30px_rgba(247,223,30,0.35)]"
-                    onClick={handleRunInPlayground}
+                    onClick={() => handleRunInPlayground()}
                   >
                     <Play className="h-4 w-4" />
                     Open in Playground

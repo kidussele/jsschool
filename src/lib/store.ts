@@ -91,6 +91,11 @@ interface AppState {
   isSearching: boolean;
   setSearchQuery: (q: string) => void;
   performSearch: (q: string) => Promise<void>;
+
+  // Playground bridge – set before navigating to "playground"
+  playgroundPayload: PlaygroundCodePayload | null;
+  setPlaygroundPayload: (payload: PlaygroundCodePayload | null) => void;
+  clearPlaygroundPayload: () => void;
 }
 
 export interface SearchResults {
@@ -98,6 +103,17 @@ export interface SearchResults {
   quizzes: { id: string; title: string; type: string }[];
   projects: { id: string; title: string; type: string }[];
   posts: { id: string; title: string; type: string }[];
+}
+
+// ── Playground code bridge ──────────────────────────────────
+export interface PlaygroundCodePayload {
+  html: string;
+  css: string;
+  js: string;
+  title?: string;
+  lessonId?: string;
+  exampleId?: string;
+  description?: string;
 }
 
 export const useAppStore = create<AppState>()(
@@ -159,6 +175,11 @@ export const useAppStore = create<AppState>()(
           set({ searchResults: null, isSearching: false });
         }
       },
+
+      // Playground bridge
+      playgroundPayload: null,
+      setPlaygroundPayload: (payload) => set({ playgroundPayload: payload }),
+      clearPlaygroundPayload: () => set({ playgroundPayload: null }),
     }),
     {
       name: "js-hero-academy",

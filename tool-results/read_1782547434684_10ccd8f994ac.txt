@@ -115,7 +115,7 @@
    115→  className,
    116→  children,
    117→  ...props
-   118→}: React.HTMLAttributes<HTMLElement> & { children?: string }) {
+   118→}: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) {
    119→  const { resolvedTheme } = useTheme();
    120→  const isDark = resolvedTheme === "dark";
    121→  const [copied, setCopied] = useState(false);
@@ -251,7 +251,7 @@
    251→    className,
    252→    children,
    253→    ...props
-   254→  }: React.HTMLAttributes<HTMLElement> & { children?: string }) => {
+   254→  }: React.HTMLAttributes<HTMLElement> & { children?: React.ReactNode }) => {
    255→    if (className && /language-/.test(className)) {
    256→      return <CodeBlock className={className} {...props}>{children}</CodeBlock>;
    257→    }
