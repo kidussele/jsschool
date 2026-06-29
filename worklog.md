@@ -162,3 +162,52 @@ Stage Summary:
 - All existing visual styles preserved: bg-js-darker, bg-js-yellow, Framer Motion animations, CodeTextarea with line numbers, browser dots preview, shadcn/ui components
 - TabKey type extended: "html" | "css" | "js" | "console"
 - Console messages received via window.addEventListener("message") routed by event.data.type === "console"
+
+---
+Task ID: 10
+Agent: SubAgent
+Task: Create GlossaryView component
+
+Work Log:
+- Created `/src/components/learn/GlossaryView.tsx` as a "use client" component
+- Defined 86 JavaScript glossary terms across 11 categories: Core Concepts (10), Functions (8), Objects (8), Arrays (8), DOM (7), Async (6), ES6+ (10), Types (7), Patterns (8), Errors (6), Tools (8)
+- Each term has: term name, definition, category, optional code example
+- Implemented real-time search filtering (by term, definition, and category)
+- Category filter pills with term counts per category, active state using bg-js-yellow
+- A-Z alphabetical index sidebar (sticky, lg: breakpoint only), highlights letters with available terms, scroll-to-letter via data-letter attributes
+- shadcn Accordion with type="multiple" for expandable term items
+- Each term card shows: bold term name (hover color → text-js-yellow), category Badge with per-category color scheme, truncated definition in trigger, full definition + code example in content
+- Code examples rendered in mini code blocks: bg-js-darker background, code-editor class, decorative window dots (rose/yellow/emerald), "Example" label
+- Framer Motion animations: header (fade+slide), search section (fade+slide), sidebar (slide from left), term list (staggered spring), empty state (fade)
+- Responsive layout: sidebar hidden on small screens, content fills space
+- Dark/light mode compatible via project theme tokens
+- 0 new TypeScript errors introduced (verified via `npx tsc --noEmit`)
+
+Stage Summary:
+- File created: `src/components/learn/GlossaryView.tsx` (~400 lines)
+- 86 inline glossary terms with definitions and 40+ code examples
+- All imports match existing project shadcn/ui components (Accordion, Badge, Input)
+- Styling matches project conventions: bg-js-yellow, text-js-yellow, bg-js-darker, code-editor, gradient-text, glass-card patterns
+- Exported as named export: `GlossaryView`
+---
+Task ID: 6-12
+Agent: Main
+Task: Add 5 new learning feature views (Flashcards, Cheat Sheets, Glossary, Visualizers, Daily Challenge)
+
+Work Log:
+- Updated store.ts: added 5 new ViewTypes (flashcards, cheatsheets, glossary, visualizers, daily-challenge)
+- Updated page.tsx: imported and routed all 5 new view components
+- Updated Header.tsx: added 5 new nav items with icons (Layers, BookMarked, FileText, Activity, Zap)
+- Created src/lib/flashcard-data.ts: 40 flashcards across 10 categories
+- Created src/components/learn/FlashcardsView.tsx: 3D flip cards, category filters, search, progress tracking with localStorage
+- Created src/components/learn/CheatSheetsView.tsx: 14 topic cheat sheets with syntax highlighting, copy buttons, sidebar navigation
+- Created src/components/learn/GlossaryView.tsx: 80+ JS terms with accordion UI, search, category filters, alphabet index
+- Created src/components/learn/VisualizersView.tsx: 4 interactive visualizers (Array bars, Call Stack, Event Loop, Promise)
+- Created src/components/learn/DailyChallengeView.tsx: 10 coding challenges, code editor with iframe execution, console output, progress tracking
+- Fixed all lint errors
+
+Stage Summary:
+- 5 new views created in src/components/learn/
+- 1 data file created (flashcard-data.ts)
+- All views match existing project styling (js-yellow, js-darker, framer-motion, shadcn/ui)
+- Server compiles successfully, 0 lint errors

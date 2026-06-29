@@ -22,7 +22,12 @@ export type ViewType =
   | "admin"
   | "search"
   | "login"
-  | "register";
+  | "register"
+  | "flashcards"
+  | "cheatsheets"
+  | "glossary"
+  | "visualizers"
+  | "daily-challenge";
 
 export interface LessonMeta {
   id: string;

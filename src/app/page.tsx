@@ -28,6 +28,11 @@ import { AdminView } from "@/components/admin/AdminView";
 import { SearchView } from "@/components/search/SearchView";
 import { LoginView } from "@/components/auth/LoginView";
 import { RegisterView } from "@/components/auth/RegisterView";
+import { FlashcardsView } from "@/components/learn/FlashcardsView";
+import { CheatSheetsView } from "@/components/learn/CheatSheetsView";
+import { GlossaryView } from "@/components/learn/GlossaryView";
+import { VisualizersView } from "@/components/learn/VisualizersView";
+import { DailyChallengeView } from "@/components/learn/DailyChallengeView";
 
 const pageVariants = {
   initial: { opacity: 0, y: 8 },
@@ -38,7 +43,6 @@ const pageVariants = {
 function ViewRouter() {
   const { currentView } = useAppStore();
 
-  // Homepage is a special multi-section page
   if (currentView === "home") {
     return (
       <motion.div
@@ -58,7 +62,6 @@ function ViewRouter() {
     );
   }
 
-  // All other views
   const viewComponents: Record<ViewType, React.ReactNode> = {
     courses: <CoursesView />,
     lesson: <LessonView />,
@@ -80,6 +83,11 @@ function ViewRouter() {
     login: <LoginView />,
     register: <RegisterView />,
     "challenge-detail": <ChallengesView />,
+    flashcards: <FlashcardsView />,
+    cheatsheets: <CheatSheetsView />,
+    glossary: <GlossaryView />,
+    visualizers: <VisualizersView />,
+    "daily-challenge": <DailyChallengeView />,
     home: null,
   };
 

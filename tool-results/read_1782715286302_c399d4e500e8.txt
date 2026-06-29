@@ -1,0 +1,1204 @@
+     1→"use client";
+     2→
+     3→import { useState, useRef, useCallback, useEffect, useMemo } from "react";
+     4→import { useTheme } from "next-themes";
+     5→import { motion, AnimatePresence } from "framer-motion";
+     6→import { Button } from "@/components/ui/button";
+     7→import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+     8→import { Badge } from "@/components/ui/badge";
+     9→import { Input } from "@/components/ui/input";
+    10→import {
+    11→  Tooltip,
+    12→  TooltipContent,
+    13→  TooltipProvider,
+    14→  TooltipTrigger,
+    15→} from "@/components/ui/tooltip";
+    16→import {
+    17→  Play,
+    18→  RotateCcw,
+    19→  Code2,
+    20→  Palette,
+    21→  FileCode,
+    22→  Maximize2,
+    23→  Minimize2,
+    24→  Copy,
+    25→  Check,
+    26→  Braces,
+    27→  Download,
+    28→  AlignLeft,
+    29→  Share2,
+    30→  X,
+    31→  Terminal,
+    32→  ArrowLeft,
+    33→  Trash2,
+    34→} from "lucide-react";
+    35→import { useAppStore } from "@/lib/store";
+    36→
+    37→/* ──────────────────────────────────────────────────────────── */
+    38→/*  Console interceptor injected into iframe BEFORE user code  */
+    39→/* ──────────────────────────────────────────────────────────── */
+    40→const CONSOLE_INTERCEPTOR = `(function(){var o={};['log','error','warn','info'].forEach(function(m){o[m]=console[m];console[m]=function(){var a=Array.prototype.slice.call(arguments);o[m].apply(console,a);parent.postMessage({type:'console',method:m,args:a.map(function(x){try{return typeof x==='object'?JSON.stringify(x,null,2):String(x);}catch(e){return String(x);}})},'*');};});window.onerror=function(msg,url,line){parent.postMessage({type:'console',method:'error',args:[msg+(line?' (line '+line+')':'')]},'*');};window.addEventListener('unhandledrejection',function(e){parent.postMessage({type:'console',method:'error',args:['Unhandled Promise Rejection: '+e.reason]},'*');});})();`;
+    41→
+    42→/* ──────────────────────────────────────────────────────────── */
+    43→/*  Defaults                                                  */
+    44→/* ──────────────────────────────────────────────────────────── */
+    45→const DEFAULT_HTML = `<div id="output">
+    46→  <h1 style="color: #F7DF1E">Hello, Hero!</h1>
+    47→  <p>Start coding here...</p>
+    48→</div>`;
+    49→
+    50→const DEFAULT_CSS = `body {
+    51→  font-family: system-ui, sans-serif;
+    52→  padding: 20px;
+    53→  background: #0F172A;
+    54→  color: white;
+    55→}`;
+    56→
+    57→const DEFAULT_JS = `// Write your JavaScript here
+    58→console.log("Hello from the playground!");
+    59→
+    60→const el = document.getElementById("output");
+    61→el.innerHTML += "<p style='color: #38BDF8'>JavaScript is running!</p>";`;
+    62→
+    63→const DEFAULTS = { html: DEFAULT_HTML, css: DEFAULT_CSS, js: DEFAULT_JS } as const;
+    64→
+    65→/* ──────────────────────────────────────────────────────────── */
+    66→/*  Types                                                     */
+    67→/* ──────────────────────────────────────────────────────────── */
+    68→type TabKey = "html" | "css" | "js" | "console";
+    69→
+    70→interface ConsoleMessage {
+    71→  id: number;
+    72→  method: "log" | "error" | "warn" | "info";
+    73→  args: string[];
+    74→  timestamp: string;
+    75→}
+    76→
+    77→const CONSOLE_METHOD_COLORS: Record<ConsoleMessage["method"], string> = {
+    78→  log: "text-foreground",
+    79→  error: "text-red-400",
+    80→  warn: "text-yellow-400",
+    81→  info: "text-blue-400",
+    82→};
+    83→
+    84→/* ──────────────────────────────────────────────────────────── */
+    85→/*  Helpers                                                   */
+    86→/* ──────────────────────────────────────────────────────────── */
+    87→function getLineCount(code: string): number {
+    88→  return code.split("\n").length;
+    89→}
+    90→
+    91→let consoleMsgIdCounter = 0;
+    92→
+    93→/* ──────────────────────────────────────────────────────────── */
+    94→/*  CodeTextarea (unchanged style, added find-replace trigger) */
+    95→/* ──────────────────────────────────────────────────────────── */
+    96→function CodeTextarea({
+    97→  value,
+    98→  onChange,
+    99→  placeholder,
+   100→  lineNumbersRef,
+   101→  onOpenFindReplace,
+   102→}: {
+   103→  value: string;
+   104→  onChange: (val: string) => void;
+   105→  placeholder: string;
+   106→  lineNumbersRef: React.RefObject<HTMLDivElement | null>;
+   107→  onOpenFindReplace?: () => void;
+   108→}) {
+   109→  const lineCount = getLineCount(value || "\n");
+   110→  const lineNumbers = Array.from({ length: lineCount }, (_, i) => i + 1);
+   111→
+   112→  const handleScroll = useCallback(
+   113→    (e: React.UIEvent<HTMLTextAreaElement>) => {
+   114→      if (lineNumbersRef.current) {
+   115→        lineNumbersRef.current.scrollTop = e.currentTarget.scrollTop;
+   116→      }
+   117→    },
+   118→    [lineNumbersRef]
+   119→  );
+   120→
+   121→  const handleKeyDown = useCallback(
+   122→    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+   123→      if (e.key === "Tab") {
+   124→        e.preventDefault();
+   125→        const target = e.currentTarget;
+   126→        const start = target.selectionStart;
+   127→        const end = target.selectionEnd;
+   128→        const newValue = value.substring(0, start) + "  " + value.substring(end);
+   129→        onChange(newValue);
+   130→        requestAnimationFrame(() => {
+   131→          target.selectionStart = target.selectionEnd = start + 2;
+   132→        });
+   133→      }
+   134→      // Ctrl+F / Ctrl+H → open find & replace (prevent browser dialog)
+   135→      if ((e.ctrlKey || e.metaKey) && (e.key === "f" || e.key === "h")) {
+   136→        e.preventDefault();
+   137→        onOpenFindReplace?.();
+   138→      }
+   139→    },
+   140→    [value, onChange, onOpenFindReplace]
+   141→  );
+   142→
+   143→  return (
+   144→    <div className="relative flex h-full overflow-hidden">
+   145→      {/* Line Numbers */}
+   146→      <div
+   147→        ref={lineNumbersRef}
+   148→        className="custom-scrollbar flex-shrink-0 select-none overflow-hidden border-r border-white/10 bg-black/30 py-3 pr-2 text-right font-mono text-xs leading-[20px] text-white/25"
+   149→        style={{ width: `${Math.max(3, String(lineCount).length) * 10 + 16}px` }}
+   150→        aria-hidden="true"
+   151→      >
+   152→        {lineNumbers.map((num) => (
+   153→          <div key={num}>{num}</div>
+   154→        ))}
+   155→      </div>
+   156→
+   157→      {/* Textarea */}
+   158→      <textarea
+   159→        value={value}
+   160→        onChange={(e) => onChange(e.target.value)}
+   161→        onScroll={handleScroll}
+   162→        onKeyDown={handleKeyDown}
+   163→        placeholder={placeholder}
+   164→        spellCheck={false}
+   165→        autoCapitalize="off"
+   166→        autoComplete="off"
+   167→        autoCorrect="off"
+   168→        className="code-editor custom-scrollbar flex-1 resize-none bg-transparent p-3 text-sm text-foreground focus:outline-none"
+   169→        style={{ lineHeight: "20px", tabSize: 2 }}
+   170→      />
+   171→    </div>
+   172→  );
+   173→}
+   174→
+   175→/* ──────────────────────────────────────────────────────────── */
+   176→/*  PlaygroundView                                            */
+   177→/* ──────────────────────────────────────────────────────────── */
+   178→export function PlaygroundView() {
+   179→  const { resolvedTheme } = useTheme();
+   180→
+   181→  /* ── Store ────────────────────────────────────────────────── */
+   182→  const clearPlaygroundPayload = useAppStore((s) => s.clearPlaygroundPayload);
+   183→  const navigateTo = useAppStore((s) => s.navigateTo);
+   184→
+   185→  /* ── Editor state ─────────────────────────────────────────── */
+   186→  const [activeTab, setActiveTab] = useState<TabKey>("html");
+   187→  const [htmlCode, setHtmlCode] = useState<string>(DEFAULTS.html);
+   188→  const [cssCode, setCssCode] = useState<string>(DEFAULTS.css);
+   189→  const [jsCode, setJsCode] = useState<string>(DEFAULTS.js);
+   190→
+   191→  /* ── UI state ─────────────────────────────────────────────── */
+   192→  const [isPreviewFullscreen, setIsPreviewFullscreen] = useState(false);
+   193→  const [isEditorFullscreen, setIsEditorFullscreen] = useState(false);
+   194→  const [copied, setCopied] = useState(false);
+   195→  const [hasRun, setHasRun] = useState(false);
+   196→  const [showSaved, setShowSaved] = useState(false);
+   197→
+   198→  /* ── Console state ────────────────────────────────────────── */
+   199→  const [consoleMessages, setConsoleMessages] = useState<ConsoleMessage[]>([]);
+   200→  const [consoleUnread, setConsoleUnread] = useState(0);
+   201→
+   202→  /* ── Find & Replace state ─────────────────────────────────── */
+   203→  const [showFindReplace, setShowFindReplace] = useState(false);
+   204→  const [findText, setFindText] = useState("");
+   205→  const [replaceText, setReplaceText] = useState("");
+   206→
+   207→  /* ── Lesson / payload state ───────────────────────────────── */
+   208→  const [lessonTitle, setLessonTitle] = useState<string | null>(null);
+   209→  const [lessonDescription, setLessonDescription] = useState<string | null>(null);
+   210→  const [lessonId, setLessonId] = useState<string | null>(null);
+   211→  const [hasLessonCode, setHasLessonCode] = useState(false);
+   212→  const originalCodeRef = useRef<{ html: string; css: string; js: string } | null>(null);
+   213→
+   214→  /* ── Refs ─────────────────────────────────────────────────── */
+   215→  const iframeRef = useRef<HTMLIFrameElement>(null);
+   216→  const htmlLineNumbersRef = useRef<HTMLDivElement>(null);
+   217→  const cssLineNumbersRef = useRef<HTMLDivElement>(null);
+   218→  const jsLineNumbersRef = useRef<HTMLDivElement>(null);
+   219→  const initializedRef = useRef(false);
+   220→  const consoleEndRef = useRef<HTMLDivElement>(null);
+   221→
+   222→  /* ──────────────────────────────────────────────────────────── */
+   223→  /*  Initialization: payload → localStorage → defaults          */
+   224→  /* ──────────────────────────────────────────────────────────── */
+   225→  useEffect(() => {
+   226→    if (initializedRef.current) return;
+   227→    initializedRef.current = true;
+   228→
+   229→    let finalHtml: string = DEFAULTS.html;
+   230→    let finalCss: string = DEFAULTS.css;
+   231→    let finalJs: string = DEFAULTS.js;
+   232→
+   233→    const payload = useAppStore.getState().playgroundPayload;
+   234→    if (payload) {
+   235→      finalHtml = payload.html || DEFAULTS.html;
+   236→      finalCss = payload.css || DEFAULTS.css;
+   237→      finalJs = payload.js || DEFAULTS.js;
+   238→      originalCodeRef.current = { html: finalHtml, css: finalCss, js: finalJs };
+   239→      setHasLessonCode(true);
+   240→      setLessonTitle(payload.title ?? null);
+   241→      setLessonDescription(payload.description ?? null);
+   242→      setLessonId(payload.lessonId ?? null);
+   243→      clearPlaygroundPayload();
+   244→    } else {
+   245→      // Try localStorage with "default" key
+   246→      try {
+   247→        const saved = localStorage.getItem("js-hero-playground-default");
+   248→        if (saved) {
+   249→          const parsed = JSON.parse(saved);
+   250→          if (parsed.html) finalHtml = parsed.html;
+   251→          if (parsed.css) finalCss = parsed.css;
+   252→          if (parsed.js) finalJs = parsed.js;
+   253→        }
+   254→      } catch {
+   255→        // ignore
+   256→      }
+   257→    }
+   258→
+   259→    setHtmlCode(finalHtml);
+   260→    setCssCode(finalCss);
+   261→    setJsCode(finalJs);
+   262→
+   263→    // Auto-run after initialization
+   264→    setTimeout(() => {
+   265→      if (iframeRef.current) {
+   266→        const srcdoc = `<!DOCTYPE html><html><head><style>${finalCss}</style></head><body>${finalHtml}<script>${CONSOLE_INTERCEPTOR}${finalJs}<\/script></body></html>`;
+   267→        iframeRef.current.srcdoc = srcdoc;
+   268→        setHasRun(true);
+   269→      }
+   270→    }, 300);
+   271→  }, []);
+   272→
+   273→  /* ── Line numbers ref map ─────────────────────────────────── */
+   274→  const lineNumbersRefMap: Record<string, React.RefObject<HTMLDivElement | null>> = {
+   275→    html: htmlLineNumbersRef,
+   276→    css: cssLineNumbersRef,
+   277→    js: jsLineNumbersRef,
+   278→  };
+   279→
+   280→  /* ── Code accessors ───────────────────────────────────────── */
+   281→  const getCodeForTab = useCallback(
+   282→    (tab: TabKey) => {
+   283→      switch (tab) {
+   284→        case "html":
+   285→          return htmlCode;
+   286→        case "css":
+   287→          return cssCode;
+   288→        case "js":
+   289→          return jsCode;
+   290→        case "console":
+   291→          return "";
+   292→      }
+   293→    },
+   294→    [htmlCode, cssCode, jsCode]
+   295→  );
+   296→
+   297→  const getActiveCode = () => {
+   298→    switch (activeTab) {
+   299→      case "html":
+   300→        return htmlCode;
+   301→      case "css":
+   302→        return cssCode;
+   303→      case "js":
+   304→        return jsCode;
+   305→      case "console":
+   306→        return "";
+   307→    }
+   308→  };
+   309→
+   310→  const getActiveSetter = (): ((val: string) => void) => {
+   311→    switch (activeTab) {
+   312→      case "html":
+   313→        return (val: string) => setHtmlCode(val);
+   314→      case "css":
+   315→        return (val: string) => setCssCode(val);
+   316→      case "js":
+   317→        return (val: string) => setJsCode(val);
+   318→      case "console":
+   319→        return () => {};
+   320→    }
+   321→  };
+   322→
+   323→  const getPlaceholder = () => {
+   324→    switch (activeTab) {
+   325→      case "html":
+   326→        return "Write your HTML here...";
+   327→      case "css":
+   328→        return "Write your CSS here...";
+   329→      case "js":
+   330→        return "Write your JavaScript here...";
+   331→      case "console":
+   332→        return "";
+   333→    }
+   334→  };
+   335→
+   336→  /* ──────────────────────────────────────────────────────────── */
+   337→  /*  Auto-save to localStorage every 5s                         */
+   338→  /* ──────────────────────────────────────────────────────────── */
+   339→  const performSave = useCallback(() => {
+   340→    const key = `js-hero-playground-${lessonId || "default"}`;
+   341→    localStorage.setItem(
+   342→      key,
+   343→      JSON.stringify({ html: htmlCode, css: cssCode, js: jsCode })
+   344→    );
+   345→    setShowSaved(true);
+   346→    setTimeout(() => setShowSaved(false), 2000);
+   347→  }, [htmlCode, cssCode, jsCode, lessonId]);
+   348→
+   349→  useEffect(() => {
+   350→    const timer = setInterval(() => {
+   351→      performSave();
+   352→    }, 5000);
+   353→    return () => clearInterval(timer);
+   354→  }, [performSave]);
+   355→
+   356→  const forceSave = useCallback(() => {
+   357→    performSave();
+   358→  }, [performSave]);
+   359→
+   360→  /* ──────────────────────────────────────────────────────────── */
+   361→  /*  Console: listen for postMessage from iframe                */
+   362→  /* ──────────────────────────────────────────────────────────── */
+   363→  useEffect(() => {
+   364→    const handler = (event: MessageEvent) => {
+   365→      if (event.data?.type === "console") {
+   366→        const { method, args } = event.data as {
+   367→          method: ConsoleMessage["method"];
+   368→          args: string[];
+   369→        };
+   370→        const msg: ConsoleMessage = {
+   371→          id: ++consoleMsgIdCounter,
+   372→          method,
+   373→          args,
+   374→          timestamp: new Date().toLocaleTimeString(),
+   375→        };
+   376→        setConsoleMessages((prev) => [...prev, msg]);
+   377→        setActiveTab((current) => {
+   378→          if (current !== "console") {
+   379→            setConsoleUnread((prev) => prev + 1);
+   380→          }
+   381→          return current;
+   382→        });
+   383→      }
+   384→    };
+   385→    window.addEventListener("message", handler);
+   386→    return () => window.removeEventListener("message", handler);
+   387→  }, []);
+   388→
+   389→  // Reset unread when console tab is active
+   390→  useEffect(() => {
+   391→    if (activeTab === "console") {
+   392→      setConsoleUnread(0);
+   393→    }
+   394→  }, [activeTab]);
+   395→
+   396→  // Auto-scroll console to bottom
+   397→  useEffect(() => {
+   398→    consoleEndRef.current?.scrollIntoView({ behavior: "smooth" });
+   399→  }, [consoleMessages]);
+   400→
+   401→  /* ──────────────────────────────────────────────────────────── */
+   402→  /*  Actions                                                    */
+   403→  /* ──────────────────────────────────────────────────────────── */
+   404→  const handleRun = useCallback(() => {
+   405→    if (!iframeRef.current) return;
+   406→    const srcdoc = `<!DOCTYPE html><html><head><style>${cssCode}</style></head><body>${htmlCode}<script>${CONSOLE_INTERCEPTOR}${jsCode}<\/script></body></html>`;
+   407→    iframeRef.current.srcdoc = srcdoc;
+   408→    setHasRun(true);
+   409→    // Clear old console messages on new run
+   410→    setConsoleMessages([]);
+   411→    setConsoleUnread(0);
+   412→  }, [htmlCode, cssCode, jsCode]);
+   413→
+   414→  const handleReset = useCallback(() => {
+   415→    if (hasLessonCode && originalCodeRef.current) {
+   416→      setHtmlCode(originalCodeRef.current.html);
+   417→      setCssCode(originalCodeRef.current.css);
+   418→      setJsCode(originalCodeRef.current.js);
+   419→      // Clear localStorage for this lesson
+   420→      const key = `js-hero-playground-${lessonId || "default"}`;
+   421→      localStorage.removeItem(key);
+   422→    } else {
+   423→      setHtmlCode(DEFAULTS.html);
+   424→      setCssCode(DEFAULTS.css);
+   425→      setJsCode(DEFAULTS.js);
+   426→      // Clear default localStorage
+   427→      localStorage.removeItem("js-hero-playground-default");
+   428→    }
+   429→    setHasRun(false);
+   430→    setConsoleMessages([]);
+   431→    setConsoleUnread(0);
+   432→    if (iframeRef.current) {
+   433→      iframeRef.current.srcdoc = "";
+   434→    }
+   435→  }, [hasLessonCode, lessonId]);
+   436→
+   437→  const handleCopy = useCallback(async () => {
+   438→    const code = getCodeForTab(activeTab);
+   439→    try {
+   440→      await navigator.clipboard.writeText(code);
+   441→      setCopied(true);
+   442→      setTimeout(() => setCopied(false), 2000);
+   443→    } catch {
+   444→      const textarea = document.createElement("textarea");
+   445→      textarea.value = code;
+   446→      document.body.appendChild(textarea);
+   447→      textarea.select();
+   448→      document.execCommand("copy");
+   449→      document.body.removeChild(textarea);
+   450→      setCopied(true);
+   451→      setTimeout(() => setCopied(false), 2000);
+   452→    }
+   453→  }, [activeTab, getCodeForTab]);
+   454→
+   455→  const handleDownload = useCallback(() => {
+   456→    const html = `<!DOCTYPE html>
+   457→<html>
+   458→<head>
+   459→  <style>${cssCode}</style>
+   460→</head>
+   461→<body>
+   462→${htmlCode}
+   463→<script>${jsCode}<\/script>
+   464→</body>
+   465→</html>`;
+   466→    const blob = new Blob([html], { type: "text/html" });
+   467→    const url = URL.createObjectURL(blob);
+   468→    const a = document.createElement("a");
+   469→    a.href = url;
+   470→    a.download = "playground.html";
+   471→    a.click();
+   472→    URL.revokeObjectURL(url);
+   473→  }, [htmlCode, cssCode, jsCode]);
+   474→
+   475→  const handleFormat = useCallback(() => {
+   476→    const setter = getActiveSetter();
+   477→    const code = getActiveCode();
+   478→    if (!code) return;
+   479→
+   480→    const lines = code.split("\n");
+   481→    let indent = 0;
+   482→    const result: string[] = [];
+   483→
+   484→    for (const line of lines) {
+   485→      const trimmed = line.trimEnd(); // keep leading whitespace for detection
+   486→      const stripped = trimmed.trim();
+   487→
+   488→      if (!stripped) {
+   489→        result.push("");
+   490→        continue;
+   491→      }
+   492→
+   493→      // Detect current line's leading whitespace for reference
+   494→      const currentIndent = (trimmed.match(/^(\s*)/)?.[1]?.length ?? 0) / 2;
+   495→
+   496→      // Decrease indent before lines starting with closing delimiters
+   497→      if (/^[}\])]/.test(stripped)) {
+   498→        indent = Math.max(0, indent - 1);
+   499→      }
+   500→
+   501→      result.push("  ".repeat(indent) + stripped);
+   502→
+   503→      // Count net open braces
+   504→      const opens = (stripped.match(/[{[\(]/g) || []).length;
+   505→      const closes = (stripped.match(/[}\]\)]/g) || []).length;
+   506→      if (opens > closes) {
+   507→        indent += opens - closes;
+   508→      } else if (closes > opens) {
+   509→        // Already decreased above, don't double-count
+   510→      }
+   511→    }
+   512→
+   513→    setter(result.join("\n"));
+   514→  }, [activeTab, htmlCode, cssCode, jsCode]);
+   515→
+   516→  const handleShare = useCallback(async () => {
+   517→    const combined = `<!-- HTML -->\n${htmlCode}\n\n/* CSS */\n<style>\n${cssCode}\n</style>\n\n// JavaScript\n${jsCode}`;
+   518→    try {
+   519→      await navigator.clipboard.writeText(combined);
+   520→      setCopied(true);
+   521→      setTimeout(() => setCopied(false), 2000);
+   522→    } catch {
+   523→      // fallback
+   524→    }
+   525→  }, [htmlCode, cssCode, jsCode]);
+   526→
+   527→  /* ── Find & Replace logic ─────────────────────────────────── */
+   528→  const matchCount = useMemo(() => {
+   529→    if (!findText || activeTab === "console") return 0;
+   530→    const code = getActiveCode();
+   531→    if (!findText) return 0;
+   532→    let count = 0;
+   533→    let pos = 0;
+   534→    const lowerCode = code.toLowerCase();
+   535→    const lowerFind = findText.toLowerCase();
+   536→    while ((pos = lowerCode.indexOf(lowerFind, pos)) !== -1) {
+   537→      count++;
+   538→      pos += 1;
+   539→    }
+   540→    return count;
+   541→  }, [findText, activeTab, htmlCode, cssCode, jsCode]);
+   542→
+   543→  const handleReplace = useCallback(() => {
+   544→    if (!findText || activeTab === "console") return;
+   545→    const code = getActiveCode();
+   546→    const index = code.toLowerCase().indexOf(findText.toLowerCase());
+   547→    if (index !== -1) {
+   548→      const newCode =
+   549→        code.substring(0, index) +
+   550→        replaceText +
+   551→        code.substring(index + findText.length);
+   552→      getActiveSetter()(newCode);
+   553→    }
+   554→  }, [findText, replaceText, activeTab, htmlCode, cssCode, jsCode]);
+   555→
+   556→  const handleReplaceAll = useCallback(() => {
+   557→    if (!findText || activeTab === "console") return;
+   558→    const code = getActiveCode();
+   559→    const escaped = findText.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+   560→    const regex = new RegExp(escaped, "gi");
+   561→    const newCode = code.replace(regex, replaceText);
+   562→    getActiveSetter()(newCode);
+   563→  }, [findText, replaceText, activeTab, htmlCode, cssCode, jsCode]);
+   564→
+   565→  /* ── Toggle line comment (Ctrl+/) ─────────────────────────── */
+   566→  const toggleLineComment = useCallback(
+   567→    (textarea: HTMLTextAreaElement) => {
+   568→      if (activeTab === "console") return;
+   569→      const setter = getActiveSetter();
+   570→      const value = textarea.value;
+   571→      const pos = textarea.selectionStart;
+   572→
+   573→      // Find line boundaries
+   574→      let lineStart = value.lastIndexOf("\n", pos - 1) + 1;
+   575→      let lineEnd = value.indexOf("\n", pos);
+   576→      if (lineEnd === -1) lineEnd = value.length;
+   577→
+   578→      const lineContent = value.substring(lineStart, lineEnd);
+   579→      const linePrefix = lineContent.match(/^(\s*)/)?.[1] ?? "";
+   580→      const afterPrefix = lineContent.slice(linePrefix.length);
+   581→
+   582→      let newLine: string;
+   583→      let posShift = 0;
+   584→
+   585→      if (afterPrefix.startsWith("// ")) {
+   586→        newLine = linePrefix + afterPrefix.slice(3);
+   587→        posShift = -3;
+   588→      } else if (afterPrefix.startsWith("//")) {
+   589→        newLine = linePrefix + afterPrefix.slice(2);
+   590→        posShift = -2;
+   591→      } else {
+   592→        newLine = linePrefix + "// " + afterPrefix;
+   593→        posShift = 3;
+   594→      }
+   595→
+   596→      const newValue =
+   597→        value.substring(0, lineStart) + newLine + value.substring(lineEnd);
+   598→      setter(newValue);
+   599→
+   600→      requestAnimationFrame(() => {
+   601→        textarea.focus();
+   602→        textarea.selectionStart = textarea.selectionEnd = pos + posShift;
+   603→      });
+   604→    },
+   605→    [activeTab, getActiveSetter]
+   606→  );
+   607→
+   608→  /* ──────────────────────────────────────────────────────────── */
+   609→  /*  Keyboard shortcuts                                         */
+   610→  /* ──────────────────────────────────────────────────────────── */
+   611→  useEffect(() => {
+   612→    const handleKeyDown = (e: KeyboardEvent) => {
+   613→      // Ctrl+Enter → run code
+   614→      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
+   615→        e.preventDefault();
+   616→        handleRun();
+   617→      }
+   618→      // Ctrl+S → force save
+   619→      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+   620→        e.preventDefault();
+   621→        forceSave();
+   622→      }
+   623→      // Ctrl+/ → toggle line comment (only when textarea is focused)
+   624→      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+   625→        const target = document.activeElement;
+   626→        if (target instanceof HTMLTextAreaElement) {
+   627→          e.preventDefault();
+   628→          toggleLineComment(target);
+   629→        }
+   630→      }
+   631→    };
+   632→    window.addEventListener("keydown", handleKeyDown);
+   633→    return () => window.removeEventListener("keydown", handleKeyDown);
+   634→  }, [handleRun, forceSave, toggleLineComment]);
+   635→
+   636→  /* ──────────────────────────────────────────────────────────── */
+   637→  /*  Tab configuration                                          */
+   638→  /* ──────────────────────────────────────────────────────────── */
+   639→  const tabsConfig: {
+   640→    key: TabKey;
+   641→    label: string;
+   642→    icon: typeof Code2;
+   643→  }[] = [
+   644→    { key: "html", label: "HTML", icon: Code2 },
+   645→    { key: "css", label: "CSS", icon: Palette },
+   646→    { key: "js", label: "JavaScript", icon: FileCode },
+   647→    { key: "console", label: "Console", icon: Terminal },
+   648→  ];
+   649→
+   650→  const activeTabConfig = tabsConfig.find((t) => t.key === activeTab)!;
+   651→
+   652→  /* ──────────────────────────────────────────────────────────── */
+   653→  /*  Render                                                     */
+   654→  /* ──────────────────────────────────────────────────────────── */
+   655→  return (
+   656→    <TooltipProvider delayDuration={400}>
+   657→      <motion.div
+   658→        initial={{ opacity: 0, y: 20 }}
+   659→        animate={{ opacity: 1, y: 0 }}
+   660→        exit={{ opacity: 0, y: -20 }}
+   661→        transition={{ duration: 0.4, ease: "easeOut" }}
+   662→        className="flex h-full flex-col gap-4"
+   663→      >
+   664→        {/* ── Lesson Context Banner ──────────────────────────── */}
+   665→        <AnimatePresence>
+   666→          {lessonTitle && (
+   667→            <motion.div
+   668→              initial={{ opacity: 0, y: -10 }}
+   669→              animate={{ opacity: 1, y: 0 }}
+   670→              exit={{ opacity: 0, y: -10 }}
+   671→              className="flex items-center justify-between rounded-lg border border-js-yellow/20 bg-js-yellow/5 px-4 py-2"
+   672→            >
+   673→              <div className="min-w-0 flex-1">
+   674→                <h3 className="truncate text-sm font-semibold text-js-yellow">
+   675→                  {lessonTitle}
+   676→                </h3>
+   677→                {lessonDescription && (
+   678→                  <p className="truncate text-xs text-muted-foreground">
+   679→                    {lessonDescription}
+   680→                  </p>
+   681→                )}
+   682→              </div>
+   683→              <Button
+   684→                variant="ghost"
+   685→                size="sm"
+   686→                onClick={() => navigateTo("lesson")}
+   687→                className="ml-3 flex-shrink-0 gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+   688→              >
+   689→                <ArrowLeft className="size-3.5" />
+   690→                Back to Lesson
+   691→              </Button>
+   692→            </motion.div>
+   693→          )}
+   694→        </AnimatePresence>
+   695→
+   696→        {/* ── Header ─────────────────────────────────────────── */}
+   697→        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+   698→          <div className="flex items-center gap-3">
+   699→            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-js-yellow/15">
+   700→              <Braces className="size-5 text-js-yellow" />
+   701→            </div>
+   702→            <div>
+   703→              <h2 className="text-xl font-bold tracking-tight">
+   704→                Code Playground
+   705→              </h2>
+   706→              <p className="text-xs text-muted-foreground">
+   707→                Write HTML, CSS &amp; JavaScript and see the result instantly
+   708→              </p>
+   709→            </div>
+   710→          </div>
+   711→
+   712→          <div className="flex flex-wrap items-center gap-2">
+   713→            {/* Copy */}
+   714→            <Tooltip>
+   715→              <TooltipTrigger asChild>
+   716→                <Button
+   717→                  variant="outline"
+   718→                  size="sm"
+   719→                  onClick={handleCopy}
+   720→                  className="gap-1.5"
+   721→                >
+   722→                  <AnimatePresence mode="wait">
+   723→                    {copied ? (
+   724→                      <motion.span
+   725→                        key="check"
+   726→                        initial={{ scale: 0, rotate: -90 }}
+   727→                        animate={{ scale: 1, rotate: 0 }}
+   728→                        exit={{ scale: 0, rotate: 90 }}
+   729→                        transition={{ duration: 0.15 }}
+   730→                      >
+   731→                        <Check className="size-3.5 text-js-emerald" />
+   732→                      </motion.span>
+   733→                    ) : (
+   734→                      <motion.span
+   735→                        key="copy"
+   736→                        initial={{ scale: 0, rotate: 90 }}
+   737→                        animate={{ scale: 1, rotate: 0 }}
+   738→                        exit={{ scale: 0, rotate: -90 }}
+   739→                        transition={{ duration: 0.15 }}
+   740→                      >
+   741→                        <Copy className="size-3.5" />
+   742→                      </motion.span>
+   743→                    )}
+   744→                  </AnimatePresence>
+   745→                  <span className="text-xs">
+   746→                    {copied ? "Copied!" : `Copy ${activeTabConfig.label}`}
+   747→                  </span>
+   748→                </Button>
+   749→              </TooltipTrigger>
+   750→              <TooltipContent>
+   751→                <p>Copy current tab code to clipboard</p>
+   752→              </TooltipContent>
+   753→            </Tooltip>
+   754→
+   755→            {/* Download */}
+   756→            <Tooltip>
+   757→              <TooltipTrigger asChild>
+   758→                <Button
+   759→                  variant="outline"
+   760→                  size="sm"
+   761→                  onClick={handleDownload}
+   762→                  className="gap-1.5"
+   763→                >
+   764→                  <Download className="size-3.5" />
+   765→                  <span className="text-xs">Download</span>
+   766→                </Button>
+   767→              </TooltipTrigger>
+   768→              <TooltipContent>
+   769→                <p>Download as HTML file</p>
+   770→              </TooltipContent>
+   771→            </Tooltip>
+   772→
+   773→            {/* Format */}
+   774→            <Tooltip>
+   775→              <TooltipTrigger asChild>
+   776→                <Button
+   777→                  variant="outline"
+   778→                  size="sm"
+   779→                  onClick={handleFormat}
+   780→                  className="gap-1.5"
+   781→                >
+   782→                  <AlignLeft className="size-3.5" />
+   783→                  <span className="text-xs">Format</span>
+   784→                </Button>
+   785→              </TooltipTrigger>
+   786→              <TooltipContent>
+   787→                <p>Basic code formatting</p>
+   788→              </TooltipContent>
+   789→            </Tooltip>
+   790→
+   791→            {/* Share */}
+   792→            <Tooltip>
+   793→              <TooltipTrigger asChild>
+   794→                <Button
+   795→                  variant="outline"
+   796→                  size="sm"
+   797→                  onClick={handleShare}
+   798→                  className="gap-1.5"
+   799→                >
+   800→                  <Share2 className="size-3.5" />
+   801→                  <span className="text-xs">Share</span>
+   802→                </Button>
+   803→              </TooltipTrigger>
+   804→              <TooltipContent>
+   805→                <p>Copy all code as combined snippet</p>
+   806→              </TooltipContent>
+   807→            </Tooltip>
+   808→
+   809→            {/* Reset / Reset Example */}
+   810→            <Tooltip>
+   811→              <TooltipTrigger asChild>
+   812→                <Button
+   813→                  variant="outline"
+   814→                  size="sm"
+   815→                  onClick={handleReset}
+   816→                  className="gap-1.5"
+   817→                >
+   818→                  <RotateCcw className="size-3.5" />
+   819→                  <span className="text-xs">
+   820→                    {hasLessonCode ? "Reset Example" : "Reset"}
+   821→                  </span>
+   822→                </Button>
+   823→              </TooltipTrigger>
+   824→              <TooltipContent>
+   825→                <p>
+   826→                  {hasLessonCode
+   827→                    ? "Reset to original lesson code"
+   828→                    : "Clear all editors to defaults"}
+   829→                </p>
+   830→              </TooltipContent>
+   831→            </Tooltip>
+   832→
+   833→            {/* Editor Fullscreen Toggle */}
+   834→            <Tooltip>
+   835→              <TooltipTrigger asChild>
+   836→                <Button
+   837→                  variant="outline"
+   838→                  size="icon"
+   839→                  className="size-8"
+   840→                  onClick={() => setIsEditorFullscreen((prev) => !prev)}
+   841→                >
+   842→                  {isEditorFullscreen ? (
+   843→                    <Minimize2 className="size-3.5" />
+   844→                  ) : (
+   845→                    <Maximize2 className="size-3.5" />
+   846→                  )}
+   847→                </Button>
+   848→              </TooltipTrigger>
+   849→              <TooltipContent>
+   850→                <p>
+   851→                  {isEditorFullscreen ? "Show preview" : "Editor fullscreen"}
+   852→                </p>
+   853→              </TooltipContent>
+   854→            </Tooltip>
+   855→
+   856→            {/* Run Code */}
+   857→            <Tooltip>
+   858→              <TooltipTrigger asChild>
+   859→                <Button
+   860→                  size="sm"
+   861→                  onClick={handleRun}
+   862→                  className="gap-1.5 bg-js-yellow text-js-darker font-semibold shadow-md shadow-js-yellow/20 transition-shadow hover:bg-js-yellow/90 hover:shadow-lg hover:shadow-js-yellow/30"
+   863→                >
+   864→                  <Play className="size-3.5 fill-current" />
+   865→                  <span className="text-xs">Run Code</span>
+   866→                </Button>
+   867→              </TooltipTrigger>
+   868→              <TooltipContent>
+   869→                <p>Execute code in the preview panel (Ctrl+Enter)</p>
+   870→              </TooltipContent>
+   871→            </Tooltip>
+   872→          </div>
+   873→        </div>
+   874→
+   875→        {/* ── Main Content: Editor + Preview ─────────────────── */}
+   876→        <div className="flex min-h-0 flex-1 flex-col gap-4 lg:flex-row">
+   877→          {/* ── Editor Panel ──────────────────────────────────── */}
+   878→          <AnimatePresence mode="wait">
+   879→            {!isPreviewFullscreen && (
+   880→              <motion.div
+   881→                initial={{ opacity: 0, x: -20 }}
+   882→                animate={{ opacity: 1, x: 0 }}
+   883→                exit={{ opacity: 0, x: -20 }}
+   884→                transition={{ duration: 0.3 }}
+   885→                className="flex min-h-[300px] flex-1 flex-col overflow-hidden rounded-xl border border-border/50 bg-card shadow-sm lg:min-h-0"
+   886→              >
+   887→                {/* Editor Tab Bar */}
+   888→                <div className="flex items-center justify-between border-b border-border/50 px-2">
+   889→                  <Tabs
+   890→                    value={activeTab}
+   891→                    onValueChange={(val) => setActiveTab(val as TabKey)}
+   892→                    className="w-full"
+   893→                  >
+   894→                    <TabsList className="h-10 gap-0.5 rounded-none border-0 bg-transparent p-0">
+   895→                      {tabsConfig.map(({ key, label, icon: Icon }) => (
+   896→                        <TabsTrigger
+   897→                          key={key}
+   898→                          value={key}
+   899→                          className="relative gap-1.5 rounded-md px-3 data-[state=active]:bg-js-yellow/10 data-[state=active]:text-js-yellow"
+   900→                        >
+   901→                          <Icon className="size-3.5" />
+   902→                          <span className="text-xs font-medium">{label}</span>
+   903→                          {key === "console" && consoleUnread > 0 && (
+   904→                            <Badge
+   905→                              variant="destructive"
+   906→                              className="ml-1 h-4 min-w-4 px-1 text-[10px] leading-4"
+   907→                            >
+   908→                              {consoleUnread > 99 ? "99+" : consoleUnread}
+   909→                            </Badge>
+   910→                          )}
+   911→                        </TabsTrigger>
+   912→                      ))}
+   913→                    </TabsList>
+   914→                  </Tabs>
+   915→
+   916→                  <div className="flex items-center gap-2">
+   917→                    {/* Auto-save indicator */}
+   918→                    <AnimatePresence>
+   919→                      {showSaved && (
+   920→                        <motion.span
+   921→                          initial={{ opacity: 0, y: -4 }}
+   922→                          animate={{ opacity: 1, y: 0 }}
+   923→                          exit={{ opacity: 0, y: -4 }}
+   924→                          transition={{ duration: 0.2 }}
+   925→                          className="text-[10px] font-medium text-js-emerald"
+   926→                        >
+   927→                          Saved ✓
+   928→                        </motion.span>
+   929→                      )}
+   930→                    </AnimatePresence>
+   931→
+   932→                    {/* Console clear button or tab label */}
+   933→                    {activeTab === "console" ? (
+   934→                      <Button
+   935→                        variant="ghost"
+   936→                        size="sm"
+   937→                        onClick={() => {
+   938→                          setConsoleMessages([]);
+   939→                          setConsoleUnread(0);
+   940→                        }}
+   941→                        className="mr-2 h-7 gap-1 text-xs text-muted-foreground hover:text-foreground"
+   942→                      >
+   943→                        <Trash2 className="size-3" />
+   944→                        Clear
+   945→                      </Button>
+   946→                    ) : (
+   947→                      <span className="mr-2 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+   948→                        {activeTab.toUpperCase()}
+   949→                      </span>
+   950→                    )}
+   951→                  </div>
+   952→                </div>
+   953→
+   954→                {/* Find & Replace Bar */}
+   955→                <AnimatePresence>
+   956→                  {showFindReplace && activeTab !== "console" && (
+   957→                    <motion.div
+   958→                      initial={{ height: 0, opacity: 0 }}
+   959→                      animate={{ height: "auto", opacity: 1 }}
+   960→                      exit={{ height: 0, opacity: 0 }}
+   961→                      transition={{ duration: 0.15 }}
+   962→                      className="overflow-hidden border-b border-border/50"
+   963→                    >
+   964→                      <div className="flex items-center gap-2 bg-js-darker/80 px-3 py-2">
+   965→                        <div className="relative flex-1">
+   966→                          <Input
+   967→                            value={findText}
+   968→                            onChange={(e) => setFindText(e.target.value)}
+   969→                            placeholder="Find..."
+   970→                            className="h-7 border-white/10 bg-black/30 text-xs"
+   971→                            autoFocus
+   972→                          />
+   973→                        </div>
+   974→                        <span className="min-w-[50px] text-center text-[10px] text-muted-foreground">
+   975→                          {findText
+   976→                            ? `${matchCount} match${matchCount !== 1 ? "es" : ""}`
+   977→                            : ""}
+   978→                        </span>
+   979→                        <div className="relative flex-1">
+   980→                          <Input
+   981→                            value={replaceText}
+   982→                            onChange={(e) => setReplaceText(e.target.value)}
+   983→                            placeholder="Replace..."
+   984→                            className="h-7 border-white/10 bg-black/30 text-xs"
+   985→                          />
+   986→                        </div>
+   987→                        <Button
+   988→                          variant="ghost"
+   989→                          size="sm"
+   990→                          onClick={handleReplace}
+   991→                          disabled={!findText || matchCount === 0}
+   992→                          className="h-7 text-xs"
+   993→                        >
+   994→                          Replace
+   995→                        </Button>
+   996→                        <Button
+   997→                          variant="ghost"
+   998→                          size="sm"
+   999→                          onClick={handleReplaceAll}
+  1000→                          disabled={!findText || matchCount === 0}
+  1001→                          className="h-7 text-xs"
+  1002→                        >
+  1003→                          All
+  1004→                        </Button>
+  1005→                        <Button
+  1006→                          variant="ghost"
+  1007→                          size="icon"
+  1008→                          className="size-7"
+  1009→                          onClick={() => {
+  1010→                            setShowFindReplace(false);
+  1011→                            setFindText("");
+  1012→                            setReplaceText("");
+  1013→                          }}
+  1014→                        >
+  1015→                          <X className="size-3.5" />
+  1016→                        </Button>
+  1017→                      </div>
+  1018→                    </motion.div>
+  1019→                  )}
+  1020→                </AnimatePresence>
+  1021→
+  1022→                {/* Editor Content / Console Panel */}
+  1023→                <div className="relative min-h-0 flex-1 overflow-hidden bg-js-darker">
+  1024→                  {activeTab === "console" ? (
+  1025→                    <div className="custom-scrollbar h-full overflow-auto p-3">
+  1026→                      {consoleMessages.length === 0 ? (
+  1027→                        <div className="flex h-full items-center justify-center text-muted-foreground">
+  1028→                          <p className="text-sm">
+  1029→                            Run code to see console output
+  1030→                          </p>
+  1031→                        </div>
+  1032→                      ) : (
+  1033→                        <div className="space-y-1">
+  1034→                          {consoleMessages.map((msg) => (
+  1035→                            <div
+  1036→                              key={msg.id}
+  1037→                              className="flex gap-2 font-mono text-xs leading-relaxed"
+  1038→                            >
+  1039→                              <span className="flex-shrink-0 text-muted-foreground/50">
+  1040→                                {msg.timestamp}
+  1041→                              </span>
+  1042→                              <span
+  1043→                                className={
+  1044→                                  CONSOLE_METHOD_COLORS[msg.method]
+  1045→                                }
+  1046→                              >
+  1047→                                {msg.args.join(" ")}
+  1048→                              </span>
+  1049→                            </div>
+  1050→                          ))}
+  1051→                          <div ref={consoleEndRef} />
+  1052→                        </div>
+  1053→                      )}
+  1054→                    </div>
+  1055→                  ) : (
+  1056→                    <AnimatePresence mode="wait">
+  1057→                      <motion.div
+  1058→                        key={activeTab}
+  1059→                        initial={{ opacity: 0, y: 4 }}
+  1060→                        animate={{ opacity: 1, y: 0 }}
+  1061→                        exit={{ opacity: 0, y: -4 }}
+  1062→                        transition={{ duration: 0.15 }}
+  1063→                        className="h-full"
+  1064→                      >
+  1065→                        <CodeTextarea
+  1066→                          value={getActiveCode()}
+  1067→                          onChange={getActiveSetter()}
+  1068→                          placeholder={getPlaceholder()}
+  1069→                          lineNumbersRef={
+  1070→                            lineNumbersRefMap[activeTab] as React.RefObject<HTMLDivElement>
+  1071→                          }
+  1072→                          onOpenFindReplace={() => setShowFindReplace(true)}
+  1073→                        />
+  1074→                      </motion.div>
+  1075→                    </AnimatePresence>
+  1076→                  )}
+  1077→                </div>
+  1078→              </motion.div>
+  1079→            )}
+  1080→          </AnimatePresence>
+  1081→
+  1082→          {/* ── Preview Panel ─────────────────────────────────── */}
+  1083→          <AnimatePresence mode="wait">
+  1084→            {!isEditorFullscreen && (
+  1085→              <motion.div
+  1086→                initial={{ opacity: 0, x: 20 }}
+  1087→                animate={{ opacity: 1, x: 0 }}
+  1088→                exit={{ opacity: 0, x: 20 }}
+  1089→                transition={{ duration: 0.3 }}
+  1090→                className="flex min-h-[250px] flex-1 flex-col overflow-hidden rounded-xl border border-border/50 bg-card shadow-sm"
+  1091→              >
+  1092→                {/* Preview Header */}
+  1093→                <div className="flex items-center justify-between border-b border-border/50 px-4 py-2">
+  1094→                  <div className="flex items-center gap-2">
+  1095→                    <div className="flex gap-1.5">
+  1096→                      <div className="size-2.5 rounded-full bg-js-rose/70" />
+  1097→                      <div className="size-2.5 rounded-full bg-js-orange/70" />
+  1098→                      <div className="size-2.5 rounded-full bg-js-emerald/70" />
+  1099→                    </div>
+  1100→                    <span className="ml-2 text-xs font-medium text-muted-foreground">
+  1101→                      Preview
+  1102→                    </span>
+  1103→                  </div>
+  1104→                  <Tooltip>
+  1105→                    <TooltipTrigger asChild>
+  1106→                      <Button
+  1107→                        variant="ghost"
+  1108→                        size="icon"
+  1109→                        className="size-7"
+  1110→                        onClick={() =>
+  1111→                          setIsPreviewFullscreen((prev) => !prev)
+  1112→                        }
+  1113→                      >
+  1114→                        {isPreviewFullscreen ? (
+  1115→                          <Minimize2 className="size-3.5" />
+  1116→                        ) : (
+  1117→                          <Maximize2 className="size-3.5" />
+  1118→                        )}
+  1119→                      </Button>
+  1120→                    </TooltipTrigger>
+  1121→                    <TooltipContent>
+  1122→                      <p>
+  1123→                        {isPreviewFullscreen
+  1124→                          ? "Exit fullscreen"
+  1125→                          : "Fullscreen preview"}
+  1126→                      </p>
+  1127→                    </TooltipContent>
+  1128→                  </Tooltip>
+  1129→                </div>
+  1130→
+  1131→                {/* Preview iframe */}
+  1132→                <div className="relative flex-1 bg-white">
+  1133→                  {!hasRun && (
+  1134→                    <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-2 bg-js-darker text-muted-foreground">
+  1135→                      <Play className="size-8 text-js-yellow/40" />
+  1136→                      <p className="text-sm">
+  1137→                        Click &quot;Run Code&quot; to see the preview
+  1138→                      </p>
+  1139→                    </div>
+  1140→                  )}
+  1141→                  <iframe
+  1142→                    ref={iframeRef}
+  1143→                    title="Code Preview"
+  1144→                    sandbox="allow-scripts allow-modals"
+  1145→                    className="h-full w-full border-0"
+  1146→                    style={{ minHeight: "100%" }}
+  1147→                  />
+  1148→                </div>
+  1149→              </motion.div>
+  1150→            )}
+  1151→          </AnimatePresence>
+  1152→        </div>
+  1153→
+  1154→        {/* ── Keyboard Shortcut Hints ─────────────────────────── */}
+  1155→        <div className="flex flex-wrap items-center justify-center gap-3 pb-1">
+  1156→          <div className="flex items-center gap-1.5">
+  1157→            <kbd className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+  1158→              Ctrl
+  1159→            </kbd>
+  1160→            <span className="text-[10px] text-muted-foreground">+</span>
+  1161→            <kbd className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+  1162→              Enter
+  1163→            </kbd>
+  1164→            <span className="text-[10px] text-muted-foreground">to run</span>
+  1165→          </div>
+  1166→          <div className="flex items-center gap-1.5">
+  1167→            <kbd className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+  1168→              Ctrl
+  1169→            </kbd>
+  1170→            <span className="text-[10px] text-muted-foreground">+</span>
+  1171→            <kbd className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+  1172→              S
+  1173→            </kbd>
+  1174→            <span className="text-[10px] text-muted-foreground">to save</span>
+  1175→          </div>
+  1176→          <div className="flex items-center gap-1.5">
+  1177→            <kbd className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+  1178→              Ctrl
+  1179→            </kbd>
+  1180→            <span className="text-[10px] text-muted-foreground">+</span>
+  1181→            <kbd className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+  1182→              /
+  1183→            </kbd>
+  1184→            <span className="text-[10px] text-muted-foreground">
+  1185→              toggle comment
+  1186→            </span>
+  1187→          </div>
+  1188→          <div className="flex items-center gap-1.5">
+  1189→            <kbd className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+  1190→              Ctrl
+  1191→            </kbd>
+  1192→            <span className="text-[10px] text-muted-foreground">+</span>
+  1193→            <kbd className="rounded border border-border/50 bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+  1194→              F
+  1195→            </kbd>
+  1196→            <span className="text-[10px] text-muted-foreground">
+  1197→              find &amp; replace
+  1198→            </span>
+  1199→          </div>
+  1200→        </div>
+  1201→      </motion.div>
+  1202→    </TooltipProvider>
+  1203→  );
+  1204→}

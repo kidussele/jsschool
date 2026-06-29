@@ -40,6 +40,11 @@ import {
   ChevronDown,
   Shield,
   X,
+  Layers,
+  BookMarked,
+  FileText,
+  Activity,
+  Zap,
 } from "lucide-react";
 import { useTheme } from "next-themes";
 import { useEffect, useState } from "react";
@@ -57,6 +62,11 @@ const navItems = [
   { label: "Leaderboard", icon: Trophy, view: "leaderboard" as const },
   { label: "Profile", icon: User, view: "profile" as const },
   { label: "Certificates", icon: Award, view: "certificates" as const },
+  { label: "Flashcards", icon: Layers, view: "flashcards" as const },
+  { label: "Cheat Sheets", icon: BookMarked, view: "cheatsheets" as const },
+  { label: "Glossary", icon: FileText, view: "glossary" as const },
+  { label: "Visualizers", icon: Activity, view: "visualizers" as const },
+  { label: "Daily Challenge", icon: Zap, view: "daily-challenge" as const },
 ];
 
 export function Header() {
