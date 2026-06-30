@@ -309,3 +309,30 @@ model PasswordResetToken {
   used      Boolean  @default(false)
   createdAt DateTime @default(now())
 }
+
+model AdminImage {
+  id        String   @id @default(cuid())
+  filename  String
+  url       String
+  alt       String?
+  size      Int      @default(0)
+  mimeType  String   @default("image/png")
+  uploadedBy String?
+  createdAt DateTime @default(now())
+
+  @@index([uploadedBy])
+}
+
+model AIPrompt {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+  systemPrompt String
+  category    String   @default("general") // general, tutoring, code_review, quiz_generation, lesson_content
+  isActive    Boolean  @default(true)
+  usageCount  Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category])
+}
