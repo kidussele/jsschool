@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,30 +8,35 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "20", 10);
     const search = searchParams.get("search") || "";
 
-    const skip = (page - 1) * limit;
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
 
-    const where: Record<string, unknown> = {};
+    let query = supabase
+      .from("DiscussionPost")
+      .select("*, user:userId(id, name, avatar)", { count: "exact" })
+      .order("isPinned", { ascending: false })
+      .order("createdAt", { ascending: false })
+      .range(from, to);
+
     if (search) {
-      where.OR = [
-        { title: { contains: search } },
-        { content: { contains: search } },
-      ];
+      query = query.or(`title.ilike.%${search}%,content.ilike.%${search}%`);
     }
 
-    const [posts, total] = await Promise.all([
-      db.discussionPost.findMany({
-        where,
-        orderBy: [{ isPinned: "desc" }, { createdAt: "desc" }],
-        skip,
-        take: limit,
-        include: {
-          user: { select: { id: true, name: true, avatar: true } },
-        },
-      }),
-      db.discussionPost.count({ where }),
-    ]);
+    const { data: posts, error, count } = await query;
 
-    return NextResponse.json({ posts, total, page, totalPages: Math.ceil(total / limit) });
+    if (error) {
+      console.error("Get posts error:", error);
+      return NextResponse.json({ error: "Failed to fetch posts" }, { status: 500 });
+    }
+
+    const total = count ?? 0;
+
+    return NextResponse.json({
+      posts: posts ?? [],
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+    });
   } catch (error) {
     console.error("Get posts error:", error);
     return NextResponse.json(
@@ -52,17 +57,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const post = await db.discussionPost.create({
-      data: {
-        userId,
-        title,
-        content,
-        tags: tags ? JSON.stringify(tags) : null,
-      },
-      include: {
-        user: { select: { id: true, name: true, avatar: true } },
-      },
-    });
+    const insertData: Record<string, unknown> = { userId, title, content };
+    if (tags) {
+      insertData.tags = JSON.stringify(tags);
+    }
+
+    const { data: post, error } = await supabase
+      .from("DiscussionPost")
+      .insert(insertData)
+      .select("*, user:userId(id, name, avatar)")
+      .single();
+
+    if (error) {
+      console.error("Create post error:", error);
+      return NextResponse.json({ error: "Failed to create post" }, { status: 500 });
+    }
 
     return NextResponse.json({ post, message: "Post created" }, { status: 201 });
   } catch (error) {

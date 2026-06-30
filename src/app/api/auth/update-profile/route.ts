@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,8 +12,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    const { data: user, error: findError } = await supabase
+      .from("User")
+      .select("*")
+      .eq("id", userId)
+      .single();
+
+    if (findError || !user) {
       return NextResponse.json(
         { error: "User not found" },
         { status: 404 }
@@ -32,11 +37,20 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const updatedUser = await db.user.update({
-      where: { id: userId },
-      data: updateData,
-      select: { id: true, name: true, email: true, avatar: true, bio: true, role: true, xp: true, coins: true, streak: true },
-    });
+    const { data: updatedUser, error: updateError } = await supabase
+      .from("User")
+      .update(updateData)
+      .eq("id", userId)
+      .select("id, name, email, avatar, bio, role, xp, coins, streak")
+      .single();
+
+    if (updateError) {
+      console.error("Update error:", updateError);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ user: updatedUser, message: "Profile updated successfully" });
   } catch (error) {

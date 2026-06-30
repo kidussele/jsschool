@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,15 +13,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const userAchievements = await db.userAchievement.findMany({
-      where: { userId },
-      include: {
-        achievement: true,
-      },
-      orderBy: { earnedAt: "desc" },
-    });
+    const { data: userAchievements, error } = await supabase
+      .from("UserAchievement")
+      .select("*, achievement:Achievement(*)")
+      .eq("userId", userId)
+      .order("earnedAt", { ascending: false });
 
-    return NextResponse.json({ achievements: userAchievements });
+    if (error) {
+      console.error("Get achievements error:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ achievements: userAchievements || [] });
   } catch (error) {
     console.error("Get achievements error:", error);
     return NextResponse.json(

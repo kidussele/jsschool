@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,18 +13,40 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const [notifications, unreadCount] = await Promise.all([
-      db.notification.findMany({
-        where: { userId },
-        orderBy: { createdAt: "desc" },
-        take: 50,
-      }),
-      db.notification.count({
-        where: { userId, read: false },
-      }),
+    const [notifRes, unreadRes] = await Promise.all([
+      supabase
+        .from("Notification")
+        .select("*")
+        .eq("userId", userId)
+        .order("createdAt", { ascending: false })
+        .range(0, 49),
+      supabase
+        .from("Notification")
+        .select("id", { count: "exact", head: true })
+        .eq("userId", userId)
+        .eq("read", false),
     ]);
 
-    return NextResponse.json({ notifications, unreadCount });
+    if (notifRes.error) {
+      console.error("Get notifications error:", notifRes.error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
+
+    if (unreadRes.error) {
+      console.error("Count unread error:", unreadRes.error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      notifications: notifRes.data || [],
+      unreadCount: unreadRes.count || 0,
+    });
   } catch (error) {
     console.error("Get notifications error:", error);
     return NextResponse.json(
@@ -45,21 +67,32 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    let error;
+
     if (notificationIds && Array.isArray(notificationIds) && notificationIds.length > 0) {
       // Mark specific notifications as read
-      await db.notification.updateMany({
-        where: {
-          id: { in: notificationIds },
-          userId,
-        },
-        data: { read: true },
-      });
+      const res = await supabase
+        .from("Notification")
+        .update({ read: true })
+        .eq("userId", userId)
+        .in("id", notificationIds);
+      error = res.error;
     } else {
       // Mark all as read
-      await db.notification.updateMany({
-        where: { userId, read: false },
-        data: { read: true },
-      });
+      const res = await supabase
+        .from("Notification")
+        .update({ read: true })
+        .eq("userId", userId)
+        .eq("read", false);
+      error = res.error;
+    }
+
+    if (error) {
+      console.error("Mark notifications error:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
     }
 
     return NextResponse.json({ message: "Notifications marked as read" });

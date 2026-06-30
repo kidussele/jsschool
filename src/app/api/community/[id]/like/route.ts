@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function POST(
   request: NextRequest,
@@ -8,20 +8,32 @@ export async function POST(
   try {
     const { id } = await params;
 
-    const post = await db.discussionPost.findUnique({ where: { id } });
-    if (!post) {
+    // Fetch current post to get current likes count
+    const { data: post, error: fetchError } = await supabase
+      .from("DiscussionPost")
+      .select("id, likes")
+      .eq("id", id)
+      .single();
+
+    if (fetchError || !post) {
       return NextResponse.json({ error: "Post not found" }, { status: 404 });
     }
 
-    // Toggle: if already liked, unlike; otherwise like
-    // We track likes via the count field, so we increment/decrement
-    // Since there's no Like model, we increment
-    const updated = await db.discussionPost.update({
-      where: { id },
-      data: { likes: { increment: 1 } },
-    });
+    const currentLikes = (post.likes as number) ?? 0;
 
-    return NextResponse.json({ likes: updated.likes, message: "Post liked" });
+    const { data: updated, error } = await supabase
+      .from("DiscussionPost")
+      .update({ likes: currentLikes + 1 })
+      .eq("id", id)
+      .select("likes")
+      .single();
+
+    if (error) {
+      console.error("Like post error:", error);
+      return NextResponse.json({ error: "Failed to like post" }, { status: 500 });
+    }
+
+    return NextResponse.json({ likes: (updated?.likes as number) ?? currentLikes + 1, message: "Post liked" });
   } catch (error) {
     console.error("Like post error:", error);
     return NextResponse.json(

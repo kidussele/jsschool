@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 const JWT_SECRET = process.env.NEXTAUTH_SECRET || "js-hero-academy-secret-key";
 
@@ -17,7 +17,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Password must be at least 6 characters" }, { status: 400 });
     }
 
-    const existingUser = await db.user.findUnique({ where: { email } });
+    const { data: existingUser } = await supabase
+      .from("User")
+      .select("id")
+      .eq("email", email)
+      .single();
+
     if (existingUser) {
       return NextResponse.json({ error: "Email already registered" }, { status: 409 });
     }
@@ -25,9 +30,16 @@ export async function POST(request: NextRequest) {
     const hashedPassword = await bcrypt.hash(password, 12);
     const today = new Date().toISOString().split("T")[0];
 
-    const user = await db.user.create({
-      data: { email, name, password: hashedPassword, lastLoginDate: today, streak: 1 },
-    });
+    const { data: user, error: createError } = await supabase
+      .from("User")
+      .insert({ email, name, password: hashedPassword, lastLoginDate: today, streak: 1, xp: 0, coins: 0, role: "student" })
+      .select()
+      .single();
+
+    if (createError) {
+      console.error("Create user error:", createError);
+      return NextResponse.json({ error: "Failed to create user" }, { status: 500 });
+    }
 
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },

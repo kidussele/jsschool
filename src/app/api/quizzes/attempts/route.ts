@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,18 +14,27 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const where: Record<string, unknown> = { userId };
-    if (quizId) where.quizId = quizId;
+    let query = supabase
+      .from("QuizAttempt")
+      .select("*, quiz:Quiz(id,title,difficulty)")
+      .eq("userId", userId)
+      .order("completedAt", { ascending: false });
 
-    const attempts = await db.quizAttempt.findMany({
-      where,
-      orderBy: { completedAt: "desc" },
-      include: {
-        quiz: { select: { id: true, title: true, difficulty: true } },
-      },
-    });
+    if (quizId) {
+      query = query.eq("quizId", quizId);
+    }
 
-    return NextResponse.json({ attempts });
+    const { data: attempts, error } = await query;
+
+    if (error) {
+      console.error("Get quiz attempts error:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ attempts: attempts || [] });
   } catch (error) {
     console.error("Get quiz attempts error:", error);
     return NextResponse.json(
@@ -46,12 +55,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const quiz = await db.quiz.findUnique({
-      where: { id: quizId },
-      include: { questions: true },
-    });
+    const { data: quiz, error: quizErr } = await supabase
+      .from("Quiz")
+      .select("*, questions:QuizQuestion(*)")
+      .eq("id", quizId)
+      .single();
 
-    if (!quiz) {
+    if (quizErr || !quiz) {
       return NextResponse.json({ error: "Quiz not found" }, { status: 404 });
     }
 
@@ -59,7 +69,7 @@ export async function POST(request: NextRequest) {
     let correctCount = 0;
     let totalPoints = 0;
 
-    const sortedQuestions = quiz.questions.sort((a, b) => a.order - b.order);
+    const sortedQuestions = [...(quiz.questions || [])].sort((a, b) => a.order - b.order);
 
     for (const question of sortedQuestions) {
       totalPoints += question.points;
@@ -78,7 +88,7 @@ export async function POST(request: NextRequest) {
     }
 
     const score = sortedQuestions
-      .filter((q, i) => {
+      .filter((q) => {
         const userAnswer = answers[q.id];
         if (q.type === "multiple_answer") {
           return Array.isArray(userAnswer) && JSON.stringify([...userAnswer].sort()) === JSON.stringify(JSON.parse(q.correctAnswer).sort());
@@ -88,8 +98,9 @@ export async function POST(request: NextRequest) {
       .reduce((sum, q) => sum + q.points, 0);
 
     // Save attempt
-    const attempt = await db.quizAttempt.create({
-      data: {
+    const { data: attempt, error: attemptErr } = await supabase
+      .from("QuizAttempt")
+      .insert({
         userId,
         quizId,
         score,
@@ -98,36 +109,45 @@ export async function POST(request: NextRequest) {
         totalQuestions: sortedQuestions.length,
         answers: JSON.stringify(answers),
         timeTaken: timeTaken || 0,
-      },
-    });
+      })
+      .select()
+      .single();
+
+    if (attemptErr) {
+      console.error("Create quiz attempt error:", attemptErr);
+      return NextResponse.json({ error: "Failed to save quiz attempt" }, { status: 500 });
+    }
 
     // Award XP (10 XP per correct answer)
     const xpEarned = correctCount * 10;
     if (xpEarned > 0) {
-      await db.user.update({
-        where: { id: userId },
-        data: { xp: { increment: xpEarned } },
-      });
+      const { data: currentUser } = await supabase
+        .from("User")
+        .select("xp")
+        .eq("id", userId)
+        .single();
+      if (currentUser) {
+        await supabase
+          .from("User")
+          .update({ xp: (currentUser.xp || 0) + xpEarned })
+          .eq("id", userId);
+      }
     }
 
     // Create notification
     const percentage = totalPoints > 0 ? Math.round((score / totalPoints) * 100) : 0;
-    await db.notification.create({
-      data: {
-        userId,
-        type: "quiz_graded",
-        title: "Quiz Completed!",
-        message: `You scored ${percentage}% on "${quiz.title}" — +${xpEarned} XP`,
-      },
+    await supabase.from("Notification").insert({
+      userId,
+      type: "quiz_graded",
+      title: "Quiz Completed!",
+      message: `You scored ${percentage}% on "${quiz.title}" — +${xpEarned} XP`,
     });
 
     // Log activity
-    await db.activityLog.create({
-      data: {
-        userId,
-        action: "quiz_taken",
-        details: JSON.stringify({ quizId, score, percentage, xpEarned }),
-      },
+    await supabase.from("ActivityLog").insert({
+      userId,
+      action: "quiz_taken",
+      details: JSON.stringify({ quizId, score, percentage, xpEarned }),
     });
 
     // Check certificate eligibility — if user scores 100%, check if all quizzes for a level are passed

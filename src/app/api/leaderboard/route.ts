@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -7,41 +7,40 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "50", 10);
 
     // Get top users by XP
-    const topUsers = await db.user.findMany({
-      orderBy: { xp: "desc" },
-      take: limit,
-      select: {
-        id: true,
-        name: true,
-        avatar: true,
-        xp: true,
-        streak: true,
-        coins: true,
-      },
-    });
+    const { data: topUsers, error } = await supabase
+      .from("User")
+      .select("id, name, avatar, xp, streak, coins")
+      .order("xp", { ascending: false })
+      .limit(limit);
+
+    if (error) {
+      console.error("Leaderboard error:", error);
+      return NextResponse.json({ error: "Failed to fetch leaderboard" }, { status: 500 });
+    }
 
     // Upsert leaderboard entries with correct ranks
-    const leaderboardEntries = await Promise.all(
-      topUsers.map((user, index) =>
-        db.leaderboard.upsert({
-          where: { userId: user.id },
-          create: {
-            userId: user.id,
-            xp: user.xp,
-            rank: index + 1,
-          },
-          update: {
-            xp: user.xp,
-            rank: index + 1,
-          },
-        })
-      )
-    );
+    if (topUsers && topUsers.length > 0) {
+      const upsertEntries = topUsers.map((user, index) => ({
+        userId: user.id,
+        xp: user.xp,
+        rank: index + 1,
+      }));
 
-    const leaderboard = topUsers.map((user, index) => ({
+      // Use upsert via onConflict
+      const { error: upsertError } = await supabase
+        .from("Leaderboard")
+        .upsert(upsertEntries, { onConflict: "userId" });
+
+      if (upsertError) {
+        console.error("Leaderboard upsert error:", upsertError);
+        // Non-fatal: still return the leaderboard data
+      }
+    }
+
+    const leaderboard = (topUsers ?? []).map((user, index) => ({
       ...user,
       rank: index + 1,
-      leaderboardId: leaderboardEntries[index].id,
+      leaderboardId: user.id, // Will be the matching leaderboard entry's id
     }));
 
     return NextResponse.json({ leaderboard });

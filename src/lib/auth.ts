@@ -1,7 +1,7 @@
 import bcrypt from "bcryptjs";
 import type { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export const authOptions: NextAuthOptions = {
   providers: [
@@ -16,11 +16,13 @@ export const authOptions: NextAuthOptions = {
           return null;
         }
 
-        const user = await db.user.findUnique({
-          where: { email: credentials.email },
-        });
+        const { data: user, error: findError } = await supabase
+          .from("User")
+          .select("*")
+          .eq("email", credentials.email)
+          .single();
 
-        if (!user) {
+        if (findError || !user) {
           return null;
         }
 
@@ -41,14 +43,14 @@ export const authOptions: NextAuthOptions = {
           newStreak = 1;
         }
 
-        await db.user.update({
-          where: { id: user.id },
-          data: {
+        await supabase
+          .from("User")
+          .update({
             lastLoginDate: today,
             streak: newStreak,
-            lastActiveAt: new Date(),
-          },
-        });
+            lastActiveAt: new Date().toISOString(),
+          })
+          .eq("id", user.id);
 
         return {
           id: user.id,
@@ -68,11 +70,13 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       if (session.user) {
-        const dbUser = await db.user.findUnique({
-          where: { id: token.id as string },
-          select: { id: true, name: true, email: true, avatar: true, xp: true, coins: true, streak: true, role: true },
-        });
-        if (dbUser) {
+        const { data: dbUser, error } = await supabase
+          .from("User")
+          .select("id, name, email, avatar, xp, coins, streak, role")
+          .eq("id", token.id as string)
+          .single();
+
+        if (!error && dbUser) {
           session.user.id = dbUser.id;
           session.user.name = dbUser.name;
           session.user.email = dbUser.email;

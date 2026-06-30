@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 function generateCertificateId(): string {
   return (
@@ -21,15 +21,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    const { data: user, error: userErr } = await supabase
+      .from("User")
+      .select("id")
+      .eq("id", userId)
+      .single();
+    if (userErr || !user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     // Check if certificate already exists for this user + level
-    const existing = await db.certificate.findFirst({
-      where: { userId, levelName },
-    });
+    const { data: existing, error: existingErr } = await supabase
+      .from("Certificate")
+      .select("*")
+      .eq("userId", userId)
+      .eq("levelName", levelName)
+      .maybeSingle();
+
+    if (existingErr) {
+      console.error("Check existing certificate error:", existingErr);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    }
 
     if (existing) {
       return NextResponse.json(
@@ -40,32 +52,35 @@ export async function POST(request: NextRequest) {
 
     const certificateId = generateCertificateId();
 
-    const certificate = await db.certificate.create({
-      data: {
+    const { data: certificate, error: certErr } = await supabase
+      .from("Certificate")
+      .insert({
         userId,
         courseName,
         levelName,
         certificateId,
-      },
-    });
+      })
+      .select()
+      .single();
+
+    if (certErr) {
+      console.error("Create certificate error:", certErr);
+      return NextResponse.json({ error: "Failed to generate certificate" }, { status: 500 });
+    }
 
     // Notify user
-    await db.notification.create({
-      data: {
-        userId,
-        type: "certificate_earned",
-        title: "Certificate Earned! 🏆",
-        message: `You earned a certificate for completing "${levelName}"! Certificate ID: ${certificateId}`,
-      },
+    await supabase.from("Notification").insert({
+      userId,
+      type: "certificate_earned",
+      title: "Certificate Earned! 🏆",
+      message: `You earned a certificate for completing "${levelName}"! Certificate ID: ${certificateId}`,
     });
 
     // Log activity
-    await db.activityLog.create({
-      data: {
-        userId,
-        action: "certificate_earned",
-        details: JSON.stringify({ certificateId, courseName, levelName }),
-      },
+    await supabase.from("ActivityLog").insert({
+      userId,
+      action: "certificate_earned",
+      details: JSON.stringify({ certificateId, courseName, levelName }),
     });
 
     return NextResponse.json(

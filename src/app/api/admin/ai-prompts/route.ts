@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,23 +8,30 @@ export async function GET(request: NextRequest) {
     const page = parseInt(searchParams.get("page") || "1", 10);
     const limit = parseInt(searchParams.get("limit") || "50", 10);
 
-    const skip = (page - 1) * limit;
-    const where: Record<string, unknown> = {};
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let query = supabase
+      .from("AIPrompt")
+      .select("*", { count: "exact" })
+      .order("createdAt", { ascending: false })
+      .range(from, to);
+
     if (category) {
-      where.category = category;
+      query = query.eq("category", category);
     }
 
-    const [prompts, total] = await Promise.all([
-      db.aIPrompt.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-      }),
-      db.aIPrompt.count({ where }),
-    ]);
+    const { data: prompts, count: total, error } = await query;
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
-    return NextResponse.json({ prompts, total, page, totalPages: Math.ceil(total / limit) });
+    return NextResponse.json({
+      prompts: prompts || [],
+      total: total ?? 0,
+      page,
+      totalPages: Math.ceil((total ?? 0) / limit),
+    });
   } catch (error) {
     console.error("List AI prompts error:", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
@@ -43,15 +50,21 @@ export async function POST(request: NextRequest) {
     const validCategories = ["general", "tutoring", "code_review", "quiz_generation", "lesson_content"];
     const cat = validCategories.includes(category) ? category : "general";
 
-    const prompt = await db.aIPrompt.create({
-      data: {
+    const { data: prompt, error } = await supabase
+      .from("AIPrompt")
+      .insert({
         name,
         description: description || null,
         systemPrompt,
         category: cat,
         isActive: isActive !== false,
-      },
-    });
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
     return NextResponse.json({ prompt }, { status: 201 });
   } catch (error) {
@@ -69,23 +82,34 @@ export async function PUT(request: NextRequest) {
       return NextResponse.json({ error: "Prompt ID is required" }, { status: 400 });
     }
 
-    const existing = await db.aIPrompt.findUnique({ where: { id } });
-    if (!existing) {
+    const { data: existing, error: findError } = await supabase
+      .from("AIPrompt")
+      .select("*")
+      .eq("id", id)
+      .single();
+
+    if (findError || !existing) {
       return NextResponse.json({ error: "Prompt not found" }, { status: 404 });
     }
 
     const validCategories = ["general", "tutoring", "code_review", "quiz_generation", "lesson_content"];
+    const updateData: Record<string, unknown> = {};
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (systemPrompt !== undefined) updateData.systemPrompt = systemPrompt;
+    if (category && validCategories.includes(category)) updateData.category = category;
+    if (isActive !== undefined) updateData.isActive = isActive;
 
-    const prompt = await db.aIPrompt.update({
-      where: { id },
-      data: {
-        name: name ?? existing.name,
-        description: description !== undefined ? description : existing.description,
-        systemPrompt: systemPrompt ?? existing.systemPrompt,
-        category: category && validCategories.includes(category) ? category : existing.category,
-        isActive: isActive !== undefined ? isActive : existing.isActive,
-      },
-    });
+    const { data: prompt, error: updateError } = await supabase
+      .from("AIPrompt")
+      .update(updateData)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
 
     return NextResponse.json({ prompt });
   } catch (error) {
@@ -103,12 +127,25 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "Prompt ID is required" }, { status: 400 });
     }
 
-    const existing = await db.aIPrompt.findUnique({ where: { id } });
-    if (!existing) {
+    const { data: existing, error: findError } = await supabase
+      .from("AIPrompt")
+      .select("id")
+      .eq("id", id)
+      .single();
+
+    if (findError || !existing) {
       return NextResponse.json({ error: "Prompt not found" }, { status: 404 });
     }
 
-    await db.aIPrompt.delete({ where: { id } });
+    const { error: deleteError } = await supabase
+      .from("AIPrompt")
+      .delete()
+      .eq("id", id);
+
+    if (deleteError) {
+      return NextResponse.json({ error: deleteError.message }, { status: 500 });
+    }
+
     return NextResponse.json({ message: "Prompt deleted" });
   } catch (error) {
     console.error("Delete AI prompt error:", error);

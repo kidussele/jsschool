@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { courseData } from "@/lib/course-data";
 import { quizData } from "@/lib/quiz-data";
 import { projectData } from "@/lib/project-data";
@@ -80,17 +80,15 @@ export async function GET(request: NextRequest) {
     }
 
     if (!type || type === "posts") {
-      const posts = await db.discussionPost.findMany({
-        where: {
-          OR: [
-            { title: { contains: q } },
-            { content: { contains: q } },
-          ],
-        },
-        take: 10,
-        select: { id: true, title: true },
-      });
-      results.posts = posts.map((p) => ({ ...p, type: "post" }));
+      const { data: posts, error } = await supabase
+        .from("DiscussionPost")
+        .select("id, title")
+        .or(`title.ilike.%${q}%,content.ilike.%${q}%`)
+        .limit(10);
+
+      if (!error && posts) {
+        results.posts = posts.map((p) => ({ ...p, type: "post" }));
+      }
     }
 
     const total = Object.values(results).reduce((sum, arr) => sum + arr.length, 0);

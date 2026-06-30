@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import jwt from "jsonwebtoken";
 
 const JWT_SECRET = process.env.NEXTAUTH_SECRET || "js-hero-academy-secret-key";
@@ -13,8 +13,13 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Email and password are required" }, { status: 400 });
     }
 
-    const user = await db.user.findUnique({ where: { email } });
-    if (!user) {
+    const { data: user, error: findError } = await supabase
+      .from("User")
+      .select("*")
+      .eq("email", email)
+      .single();
+
+    if (findError || !user) {
       return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
     }
 
@@ -31,10 +36,14 @@ export async function POST(req: NextRequest) {
       newStreak = user.lastLoginDate === yesterday ? user.streak + 1 : 1;
     }
 
-    await db.user.update({
-      where: { id: user.id },
-      data: { lastLoginDate: today, streak: newStreak, lastActiveAt: new Date() },
-    });
+    await supabase
+      .from("User")
+      .update({
+        lastLoginDate: today,
+        streak: newStreak,
+        lastActiveAt: new Date().toISOString(),
+      })
+      .eq("id", user.id);
 
     const token = jwt.sign(
       { userId: user.id, email: user.email, role: user.role },

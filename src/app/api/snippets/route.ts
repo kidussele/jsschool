@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,12 +13,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const snippets = await db.codeSnippet.findMany({
-      where: { userId },
-      orderBy: { updatedAt: "desc" },
-    });
+    const { data: snippets, error } = await supabase
+      .from("CodeSnippet")
+      .select("*")
+      .eq("userId", userId)
+      .order("updatedAt", { ascending: false });
 
-    return NextResponse.json({ snippets });
+    if (error) {
+      console.error("Get snippets error:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ snippets: snippets || [] });
   } catch (error) {
     console.error("Get snippets error:", error);
     return NextResponse.json(
@@ -39,16 +48,26 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const snippet = await db.codeSnippet.create({
-      data: {
+    const { data: snippet, error } = await supabase
+      .from("CodeSnippet")
+      .insert({
         userId,
         title,
         html: html || "",
         css: css || "",
         javascript: javascript || "",
         isPublic: isPublic || false,
-      },
-    });
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Save snippet error:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ snippet, message: "Snippet saved" }, { status: 201 });
   } catch (error) {

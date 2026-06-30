@@ -1,77 +1,107 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { courseData } from "@/lib/course-data";
+
+// Helper: increment a user's XP atomically via fetch-then-update
+async function incrementUserXp(userId: string, xpAmount: number, timeMinutes?: number) {
+  const { data: user, error: fetchErr } = await supabase
+    .from("User")
+    .select("xp, totalTimeSpent")
+    .eq("id", userId)
+    .single();
+  if (fetchErr || !user) return;
+
+  const updateData: Record<string, unknown> = {
+    xp: (user.xp || 0) + xpAmount,
+  };
+  if (timeMinutes !== undefined) {
+    updateData.totalTimeSpent = (user.totalTimeSpent || 0) + timeMinutes;
+  }
+
+  await supabase.from("User").update(updateData).eq("id", userId);
+}
 
 // Helper: check and award achievements
 async function checkAchievements(userId: string) {
-  const user = await db.user.findUnique({ where: { id: userId } });
-  if (!user) return [];
+  const { data: user, error: userErr } = await supabase
+    .from("User")
+    .select("*")
+    .eq("id", userId)
+    .single();
+  if (userErr || !user) return [];
 
-  const completedLessons = await db.userProgress.count({
-    where: { userId, status: "completed" },
-  });
+  const { count: completedLessons } = await supabase
+    .from("UserProgress")
+    .select("id", { count: "exact", head: true })
+    .eq("userId", userId)
+    .eq("status", "completed");
 
   const totalLessons = courseData.reduce(
     (acc, level) => acc + level.modules.reduce((a, mod) => a + mod.lessons.length, 0),
     0
   );
 
-  const perfectQuizzes = await db.quizAttempt.findMany({
-    where: { userId, score: { gt: 0 } },
-    include: { quiz: { include: { questions: true } } },
-  });
+  const { data: perfectQuizzes } = await supabase
+    .from("QuizAttempt")
+    .select("*")
+    .eq("userId", userId)
+    .gt("score", 0);
 
-  const hasPerfectQuiz = perfectQuizzes.some(
+  const hasPerfectQuiz = (perfectQuizzes || []).some(
     (a) => a.totalQuestions > 0 && a.correctCount === a.totalQuestions
   );
 
-  const challengeSubmissions = await db.challengeSubmission.count({
-    where: { userId, passed: true },
-  });
+  const { count: challengeSubmissions } = await supabase
+    .from("ChallengeSubmission")
+    .select("id", { count: "exact", head: true })
+    .eq("userId", userId)
+    .eq("passed", true);
 
-  const achievements = await db.achievement.findMany();
+  const { data: achievements, error: achErr } = await supabase
+    .from("Achievement")
+    .select("*");
+  if (achErr || !achievements) return [];
+
   const newlyEarned: string[] = [];
 
   const checks: Record<string, boolean> = {
-    "first-steps": completedLessons >= 1,
-    "quick-learner": completedLessons >= 10,
+    "first-steps": (completedLessons || 0) >= 1,
+    "quick-learner": (completedLessons || 0) >= 10,
     "quiz-master": hasPerfectQuiz,
-    "code-warrior": challengeSubmissions >= 5,
-    "streak-king": user.streak >= 7,
-    "halfway-hero": totalLessons > 0 && completedLessons >= Math.floor(totalLessons * 0.5),
-    "javascript-hero": totalLessons > 0 && completedLessons >= totalLessons,
+    "code-warrior": (challengeSubmissions || 0) >= 5,
+    "streak-king": (user.streak || 0) >= 7,
+    "halfway-hero": totalLessons > 0 && (completedLessons || 0) >= Math.floor(totalLessons * 0.5),
+    "javascript-hero": totalLessons > 0 && (completedLessons || 0) >= totalLessons,
   };
 
   // Project builder check
-  const projectSubmissions = await db.projectSubmission.count({
-    where: { userId },
-  });
-  checks["project-builder"] = projectSubmissions >= 1;
+  const { count: projectSubmissions } = await supabase
+    .from("ProjectSubmission")
+    .select("id", { count: "exact", head: true })
+    .eq("userId", userId);
+  checks["project-builder"] = (projectSubmissions || 0) >= 1;
 
   for (const achievement of achievements) {
     if (checks[achievement.id]) {
-      const existing = await db.userAchievement.findUnique({
-        where: {
-          userId_achievementId: { userId, achievementId: achievement.id },
-        },
-      });
+      const { data: existing } = await supabase
+        .from("UserAchievement")
+        .select("id")
+        .eq("userId", userId)
+        .eq("achievementId", achievement.id)
+        .maybeSingle();
       if (!existing) {
-        await db.userAchievement.create({
-          data: { userId, achievementId: achievement.id },
+        await supabase.from("UserAchievement").insert({
+          userId,
+          achievementId: achievement.id,
         });
         // Award XP
-        await db.user.update({
-          where: { id: userId },
-          data: { xp: { increment: achievement.xpReward } },
-        });
+        await incrementUserXp(userId, achievement.xpReward);
         // Create notification
-        await db.notification.create({
-          data: {
-            userId,
-            type: "achievement_unlocked",
-            title: "Achievement Unlocked!",
-            message: `You earned "${achievement.name}" — +${achievement.xpReward} XP`,
-          },
+        await supabase.from("Notification").insert({
+          userId,
+          type: "achievement_unlocked",
+          title: "Achievement Unlocked!",
+          message: `You earned "${achievement.name}" — +${achievement.xpReward} XP`,
         });
         newlyEarned.push(achievement.id);
       }
@@ -93,12 +123,17 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const progress = await db.userProgress.findMany({
-      where: { userId },
-      orderBy: { updatedAt: "desc" },
-    });
+    const { data: progress, error } = await supabase
+      .from("UserProgress")
+      .select("*")
+      .eq("userId", userId)
+      .order("updatedAt", { ascending: false });
 
-    return NextResponse.json({ progress });
+    if (error) {
+      return NextResponse.json({ error: "Failed to fetch progress" }, { status: 500 });
+    }
+
+    return NextResponse.json({ progress: progress || [] });
   } catch (error) {
     console.error("Get progress error:", error);
     return NextResponse.json(
@@ -127,58 +162,52 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    const { data: user, error: userErr } = await supabase
+      .from("User")
+      .select("id")
+      .eq("id", userId)
+      .single();
+    if (userErr || !user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    const progress = await db.userProgress.upsert({
-      where: {
-        userId_lessonId: { userId, lessonId },
-      },
-      create: {
-        userId,
-        lessonId,
-        status,
-        xpEarned: xpEarned || 0,
-        timeSpent: timeSpent || 0,
-        completedAt: status === "completed" ? new Date() : null,
-      },
-      update: {
-        status,
-        xpEarned: xpEarned || 0,
-        timeSpent: timeSpent || 0,
-        completedAt: status === "completed" ? new Date() : undefined,
-      },
-    });
+    const upsertData = {
+      userId,
+      lessonId,
+      status,
+      xpEarned: xpEarned || 0,
+      timeSpent: timeSpent || 0,
+      completedAt: status === "completed" ? new Date().toISOString() : null,
+    };
+
+    const { data: progress, error: upsertErr } = await supabase
+      .from("UserProgress")
+      .upsert(upsertData, { onConflict: "userId,lessonId" })
+      .select()
+      .single();
+
+    if (upsertErr) {
+      console.error("Upsert progress error:", upsertErr);
+      return NextResponse.json({ error: "Failed to save progress" }, { status: 500 });
+    }
 
     // Award XP to user if completed
     if (status === "completed" && xpEarned > 0) {
-      await db.user.update({
-        where: { id: userId },
-        data: {
-          xp: { increment: xpEarned },
-          totalTimeSpent: { increment: Math.floor((timeSpent || 0) / 60) },
-        },
-      });
+      await incrementUserXp(userId, xpEarned, Math.floor((timeSpent || 0) / 60));
 
       // Create notification
-      await db.notification.create({
-        data: {
-          userId,
-          type: "course_completed",
-          title: "Lesson Completed!",
-          message: `You earned ${xpEarned} XP for completing a lesson.`,
-        },
+      await supabase.from("Notification").insert({
+        userId,
+        type: "course_completed",
+        title: "Lesson Completed!",
+        message: `You earned ${xpEarned} XP for completing a lesson.`,
       });
 
       // Log activity
-      await db.activityLog.create({
-        data: {
-          userId,
-          action: "lesson_completed",
-          details: JSON.stringify({ lessonId, xpEarned }),
-        },
+      await supabase.from("ActivityLog").insert({
+        userId,
+        action: "lesson_completed",
+        details: JSON.stringify({ lessonId, xpEarned }),
       });
     }
 

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,39 +8,30 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "20", 10);
     const search = searchParams.get("search") || "";
 
-    const skip = (page - 1) * limit;
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
 
-    const where: Record<string, unknown> = {};
+    let query = supabase
+      .from("User")
+      .select("id, name, email, avatar, role, xp, coins, streak, lastLoginDate, createdAt", { count: "exact" })
+      .order("createdAt", { ascending: false })
+      .range(from, to);
+
     if (search) {
-      where.OR = [
-        { name: { contains: search } },
-        { email: { contains: search } },
-      ];
+      query = query.or(`name.ilike.%${search}%,email.ilike.%${search}%`);
     }
 
-    const [users, total] = await Promise.all([
-      db.user.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          avatar: true,
-          role: true,
-          xp: true,
-          coins: true,
-          streak: true,
-          lastLoginDate: true,
-          createdAt: true,
-        },
-      }),
-      db.user.count({ where }),
-    ]);
+    const { data: users, count: total, error } = await query;
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
 
-    return NextResponse.json({ users, total, page, totalPages: Math.ceil(total / limit) });
+    return NextResponse.json({
+      users: users || [],
+      total: total ?? 0,
+      page,
+      totalPages: Math.ceil((total ?? 0) / limit),
+    });
   } catch (error) {
     console.error("List users error:", error);
     return NextResponse.json(
@@ -69,16 +60,26 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    const { data: user, error: findError } = await supabase
+      .from("User")
+      .select("id")
+      .eq("id", userId)
+      .single();
+
+    if (findError || !user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    const updated = await db.user.update({
-      where: { id: userId },
-      data: { role },
-      select: { id: true, name: true, email: true, role: true },
-    });
+    const { data: updated, error: updateError } = await supabase
+      .from("User")
+      .update({ role })
+      .eq("id", userId)
+      .select("id, name, email, role")
+      .single();
+
+    if (updateError) {
+      return NextResponse.json({ error: updateError.message }, { status: 500 });
+    }
 
     return NextResponse.json({ user: updated, message: "User role updated" });
   } catch (error) {
@@ -102,12 +103,24 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    const { data: user, error: findError } = await supabase
+      .from("User")
+      .select("id")
+      .eq("id", userId)
+      .single();
+
+    if (findError || !user) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    await db.user.delete({ where: { id: userId } });
+    const { error: deleteError } = await supabase
+      .from("User")
+      .delete()
+      .eq("id", userId);
+
+    if (deleteError) {
+      return NextResponse.json({ error: deleteError.message }, { status: 500 });
+    }
 
     return NextResponse.json({ message: "User deleted" });
   } catch (error) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 function executeCodeSafely(code: string, testCases: { input: string; expected: string }[]) {
   const results: { input: string; expected: string; actual: string; passed: boolean }[] = [];
@@ -61,11 +61,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const challenge = await db.dailyChallenge.findUnique({
-      where: { id: challengeId },
-    });
+    const { data: challenge, error: challengeErr } = await supabase
+      .from("DailyChallenge")
+      .select("*")
+      .eq("id", challengeId)
+      .single();
 
-    if (!challenge) {
+    if (challengeErr || !challenge) {
       return NextResponse.json(
         { error: "Challenge not found" },
         { status: 404 }
@@ -79,8 +81,9 @@ export async function POST(request: NextRequest) {
     const score = allPassed ? 100 : Math.round((passedCount / testCases.length) * 100);
 
     // Save submission
-    const submission = await db.challengeSubmission.create({
-      data: {
+    const { data: submission, error: subErr } = await supabase
+      .from("ChallengeSubmission")
+      .insert({
         userId,
         challengeId,
         code,
@@ -88,31 +91,40 @@ export async function POST(request: NextRequest) {
         testResults: JSON.stringify(testResults),
         score,
         xpEarned: allPassed ? challenge.xpReward : 0,
-      },
-    });
+      })
+      .select()
+      .single();
+
+    if (subErr) {
+      console.error("Save challenge submission error:", subErr);
+      return NextResponse.json({ error: "Failed to save submission" }, { status: 500 });
+    }
 
     // Award XP if passed
     if (allPassed) {
-      await db.user.update({
-        where: { id: userId },
-        data: { xp: { increment: challenge.xpReward } },
+      const { data: currentUser } = await supabase
+        .from("User")
+        .select("xp")
+        .eq("id", userId)
+        .single();
+      if (currentUser) {
+        await supabase
+          .from("User")
+          .update({ xp: (currentUser.xp || 0) + challenge.xpReward })
+          .eq("id", userId);
+      }
+
+      await supabase.from("Notification").insert({
+        userId,
+        type: "general",
+        title: "Challenge Completed! 🎉",
+        message: `You solved "${challenge.title}" — +${challenge.xpReward} XP`,
       });
 
-      await db.notification.create({
-        data: {
-          userId,
-          type: "general",
-          title: "Challenge Completed! 🎉",
-          message: `You solved "${challenge.title}" — +${challenge.xpReward} XP`,
-        },
-      });
-
-      await db.activityLog.create({
-        data: {
-          userId,
-          action: "challenge_submitted",
-          details: JSON.stringify({ challengeId, passed: true, xpEarned: challenge.xpReward }),
-        },
+      await supabase.from("ActivityLog").insert({
+        userId,
+        action: "challenge_submitted",
+        details: JSON.stringify({ challengeId, passed: true, xpEarned: challenge.xpReward }),
       });
     }
 

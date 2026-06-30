@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function POST(request: NextRequest) {
   try {
@@ -12,8 +12,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    const { data: user, error: findError } = await supabase
+      .from("User")
+      .select("id")
+      .eq("id", userId)
+      .single();
+
+    if (findError || !user) {
       return NextResponse.json(
         { error: "User not found" },
         { status: 404 }
@@ -21,7 +26,18 @@ export async function POST(request: NextRequest) {
     }
 
     // Delete the user — cascading deletes will handle all related data
-    await db.user.delete({ where: { id: userId } });
+    const { error: deleteError } = await supabase
+      .from("User")
+      .delete()
+      .eq("id", userId);
+
+    if (deleteError) {
+      console.error("Delete error:", deleteError);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ message: "Account deleted successfully" });
   } catch (error) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,11 +14,20 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const note = await db.lessonNote.findUnique({
-      where: {
-        userId_lessonId: { userId, lessonId },
-      },
-    });
+    const { data: note, error } = await supabase
+      .from("LessonNote")
+      .select("*")
+      .eq("userId", userId)
+      .eq("lessonId", lessonId)
+      .maybeSingle();
+
+    if (error) {
+      console.error("Get note error:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ note });
   } catch (error) {
@@ -41,13 +50,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const note = await db.lessonNote.upsert({
-      where: {
-        userId_lessonId: { userId, lessonId },
-      },
-      create: { userId, lessonId, content },
-      update: { content },
-    });
+    const { data: note, error } = await supabase
+      .from("LessonNote")
+      .upsert({ userId, lessonId, content }, { onConflict: "userId,lessonId" })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Save note error:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ note, message: "Note saved successfully" });
   } catch (error) {

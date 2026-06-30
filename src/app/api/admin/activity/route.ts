@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,33 +8,49 @@ export async function GET(request: NextRequest) {
     const limit = parseInt(searchParams.get("limit") || "30", 10);
     const action = searchParams.get("action") || "";
 
-    const skip = (page - 1) * limit;
-    const where: Record<string, unknown> = {};
+    const from = (page - 1) * limit;
+    const to = from + limit - 1;
+
+    let query = supabase
+      .from("ActivityLog")
+      .select("*, User(id, name, email, avatar)", { count: "exact" })
+      .order("createdAt", { ascending: false })
+      .range(from, to);
+
     if (action) {
-      where.action = action;
+      query = query.eq("action", action);
     }
 
-    const [logs, total] = await Promise.all([
-      db.activityLog.findMany({
-        where,
-        orderBy: { createdAt: "desc" },
-        skip,
-        take: limit,
-        include: {
-          user: { select: { id: true, name: true, email: true, avatar: true } },
-        },
-      }),
-      db.activityLog.count({ where }),
-    ]);
+    const { data: logs, count: total, error } = await query;
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 500 });
+    }
+
+    const enrichedLogs = (logs || []).map((l) => {
+      const user = l.User as { id?: string; name?: string; email?: string; avatar?: string } | null;
+      return {
+        id: l.id,
+        userId: l.userId,
+        action: l.action,
+        details: l.details,
+        createdAt: new Date(l.createdAt).toISOString(),
+        user: user
+          ? {
+              id: user.id,
+              name: user.name,
+              email: user.email,
+              avatar: user.avatar,
+            }
+          : null,
+      };
+    });
 
     return NextResponse.json({
-      logs: logs.map((l) => ({
-        ...l,
-        createdAt: l.createdAt.toISOString(),
-      })),
-      total,
+      logs: enrichedLogs,
+      total: total ?? 0,
       page,
-      totalPages: Math.ceil(total / limit),
+      totalPages: Math.ceil((total ?? 0) / limit),
     });
   } catch (error) {
     console.error("Activity logs error:", error);

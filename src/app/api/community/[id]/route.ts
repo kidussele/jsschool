@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(
   request: NextRequest,
@@ -8,18 +8,21 @@ export async function GET(
   try {
     const { id } = await params;
 
-    const post = await db.discussionPost.findUnique({
-      where: { id },
-      include: {
-        user: { select: { id: true, name: true, avatar: true } },
-        replies: {
-          orderBy: { createdAt: "asc" },
-        },
-      },
-    });
+    const { data: post, error } = await supabase
+      .from("DiscussionPost")
+      .select("*, user:userId(id, name, avatar), replies(*, user:userId(id, name, avatar))")
+      .eq("id", id)
+      .single();
 
-    if (!post) {
+    if (error || !post) {
       return NextResponse.json({ error: "Post not found" }, { status: 404 });
+    }
+
+    // Sort replies by createdAt ascending (Supabase doesn't support nested ordering)
+    if (post.replies && Array.isArray(post.replies)) {
+      (post.replies as unknown[]).sort(
+        (a: any, b: any) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
+      );
     }
 
     return NextResponse.json({ post });
@@ -47,8 +50,14 @@ export async function PUT(
       );
     }
 
-    const post = await db.discussionPost.findUnique({ where: { id } });
-    if (!post) {
+    // Check post exists
+    const { data: existing, error: fetchError } = await supabase
+      .from("DiscussionPost")
+      .select("id")
+      .eq("id", id)
+      .single();
+
+    if (fetchError || !existing) {
       return NextResponse.json({ error: "Post not found" }, { status: 404 });
     }
 
@@ -56,12 +65,19 @@ export async function PUT(
     if (content) updateData.content = content;
     if (title) updateData.title = title;
 
-    const updated = await db.discussionPost.update({
-      where: { id },
-      data: updateData,
-    });
+    const { data: post, error } = await supabase
+      .from("DiscussionPost")
+      .update(updateData)
+      .eq("id", id)
+      .select()
+      .single();
 
-    return NextResponse.json({ post: updated, message: "Post updated" });
+    if (error) {
+      console.error("Update post error:", error);
+      return NextResponse.json({ error: "Failed to update post" }, { status: 500 });
+    }
+
+    return NextResponse.json({ post, message: "Post updated" });
   } catch (error) {
     console.error("Update post error:", error);
     return NextResponse.json(
@@ -78,12 +94,26 @@ export async function DELETE(
   try {
     const { id } = await params;
 
-    const post = await db.discussionPost.findUnique({ where: { id } });
-    if (!post) {
+    // Check post exists
+    const { data: existing, error: fetchError } = await supabase
+      .from("DiscussionPost")
+      .select("id")
+      .eq("id", id)
+      .single();
+
+    if (fetchError || !existing) {
       return NextResponse.json({ error: "Post not found" }, { status: 404 });
     }
 
-    await db.discussionPost.delete({ where: { id } });
+    const { error } = await supabase
+      .from("DiscussionPost")
+      .delete()
+      .eq("id", id);
+
+    if (error) {
+      console.error("Delete post error:", error);
+      return NextResponse.json({ error: "Failed to delete post" }, { status: 500 });
+    }
 
     return NextResponse.json({ message: "Post deleted" });
   } catch (error) {

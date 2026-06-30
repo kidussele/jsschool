@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 import { quizData } from "@/lib/quiz-data";
 import { projectData } from "@/lib/project-data";
 
@@ -83,133 +83,121 @@ export async function POST() {
       },
     ];
 
-    for (const a of achievements) {
-      await db.achievement.upsert({
-        where: { id: a.id },
-        create: a,
-        update: { name: a.name, description: a.description, xpReward: a.xpReward },
-      });
-      results.achievements++;
+    const { error: aError } = await supabase
+      .from("Achievement")
+      .upsert(achievements, { onConflict: "id" });
+    if (!aError) {
+      results.achievements = achievements.length;
     }
 
     // 2. Seed Quizzes from quizData
     for (const quiz of quizData) {
-      const dbQuiz = await db.quiz.upsert({
-        where: { id: quiz.id },
-        create: {
-          id: quiz.id,
-          title: quiz.title,
-          description: quiz.description,
-          difficulty: quiz.difficulty,
-          moduleId: quiz.moduleId || null,
-        },
-        update: {
-          title: quiz.title,
-          description: quiz.description,
-          difficulty: quiz.difficulty,
-        },
-      });
-
-      results.quizzes++;
-
-      for (const q of quiz.questions) {
-        await db.quizQuestion.upsert({
-          where: { id: q.id },
-          create: {
-            id: q.id,
-            quizId: dbQuiz.id,
-            question: q.question,
-            type: q.type,
-            options: q.options ? JSON.stringify(q.options) : null,
-            correctAnswer: q.correctAnswer,
-            explanation: q.explanation || null,
-            codeSnippet: q.codeSnippet || null,
-            points: q.points,
-            order: quiz.questions.indexOf(q),
+      const { data: dbQuiz, error: qError } = await supabase
+        .from("Quiz")
+        .upsert(
+          {
+            id: quiz.id,
+            title: quiz.title,
+            description: quiz.description,
+            difficulty: quiz.difficulty,
+            moduleId: quiz.moduleId || null,
           },
-          update: {
-            question: q.question,
-            correctAnswer: q.correctAnswer,
-            points: q.points,
-          },
-        });
-        results.questions++;
+          { onConflict: "id" }
+        )
+        .select()
+        .single();
+
+      if (!qError && dbQuiz) {
+        results.quizzes++;
+
+        const questionRows = quiz.questions.map((q, i) => ({
+          id: q.id,
+          quizId: dbQuiz.id,
+          question: q.question,
+          type: q.type,
+          options: q.options ? JSON.stringify(q.options) : null,
+          correctAnswer: q.correctAnswer,
+          explanation: q.explanation || null,
+          codeSnippet: q.codeSnippet || null,
+          points: q.points,
+          order: i,
+        }));
+
+        const { error: qqError } = await supabase
+          .from("QuizQuestion")
+          .upsert(questionRows, { onConflict: "id" });
+
+        if (!qqError) {
+          results.questions += quiz.questions.length;
+        }
       }
     }
 
     // 3. Seed Projects from projectData
-    for (const proj of projectData) {
-      await db.project.upsert({
-        where: { id: proj.id },
-        create: {
-          id: proj.id,
-          title: proj.title,
-          description: proj.description,
-          difficulty: proj.difficulty,
-          category: proj.category,
-          duration: proj.duration,
-          skills: JSON.stringify(proj.skills),
-          steps: JSON.stringify(proj.steps),
-        },
-        update: {
-          title: proj.title,
-          description: proj.description,
-        },
-      });
-      results.projects++;
+    const projectRows = projectData.map((proj) => ({
+      id: proj.id,
+      title: proj.title,
+      description: proj.description,
+      difficulty: proj.difficulty,
+      category: proj.category,
+      duration: proj.duration,
+      skills: JSON.stringify(proj.skills),
+      steps: JSON.stringify(proj.steps),
+    }));
+
+    const { error: pError } = await supabase
+      .from("Project")
+      .upsert(projectRows, { onConflict: "id" });
+
+    if (!pError) {
+      results.projects = projectRows.length;
     }
 
     // 4. Seed Daily Challenges
     const { dailyChallenges } = await import("@/lib/quiz-data");
     const today = new Date().toISOString().split("T")[0];
 
-    for (let i = 0; i < dailyChallenges.length; i++) {
-      const dc = dailyChallenges[i];
-      const date = new Date(Date.now() - i * 86400000).toISOString().split("T")[0];
+    const challengeRows = dailyChallenges.map((dc, i) => ({
+      id: dc.id,
+      title: dc.title,
+      description: dc.description,
+      difficulty: dc.difficulty,
+      codeTemplate: dc.codeTemplate,
+      testCases: JSON.stringify(dc.testCases),
+      solution: dc.solution,
+      xpReward: dc.xpReward,
+      date: new Date(Date.now() - i * 86400000).toISOString().split("T")[0],
+    }));
 
-      await db.dailyChallenge.upsert({
-        where: { id: dc.id },
-        create: {
-          id: dc.id,
-          title: dc.title,
-          description: dc.description,
-          difficulty: dc.difficulty,
-          codeTemplate: dc.codeTemplate,
-          testCases: JSON.stringify(dc.testCases),
-          solution: dc.solution,
-          xpReward: dc.xpReward,
-          date,
-        },
-        update: {
-          title: dc.title,
-          description: dc.description,
-          difficulty: dc.difficulty,
-          codeTemplate: dc.codeTemplate,
-          testCases: JSON.stringify(dc.testCases),
-          solution: dc.solution,
-          xpReward: dc.xpReward,
-        },
-      });
-      results.challenges++;
+    const { error: dcError } = await supabase
+      .from("DailyChallenge")
+      .upsert(challengeRows, { onConflict: "id" });
+
+    if (!dcError) {
+      results.challenges = challengeRows.length;
     }
 
     // 5. Seed Admin User
     const adminEmail = "admin@jshero.academy";
-    const existingAdmin = await db.user.findUnique({ where: { email: adminEmail } });
+    const { data: existingAdmin } = await supabase
+      .from("User")
+      .select("id")
+      .eq("email", adminEmail)
+      .maybeSingle();
 
     if (!existingAdmin) {
       const hashedPassword = await bcrypt.hash("admin123", 12);
-      await db.user.create({
-        data: {
-          email: adminEmail,
-          name: "Admin",
-          password: hashedPassword,
-          role: "admin",
-          xp: 0,
-          lastLoginDate: today,
-        },
+      const { error: uError } = await supabase.from("User").insert({
+        email: adminEmail,
+        name: "Admin",
+        password: hashedPassword,
+        role: "admin",
+        xp: 0,
+        lastLoginDate: today,
       });
-      results.adminUser = 1;
+      if (!uError) {
+        results.adminUser = 1;
+      }
     } else {
       results.adminUser = 0;
     }

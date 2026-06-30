@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import bcrypt from "bcryptjs";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,8 +20,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const user = await db.user.findUnique({ where: { id: userId } });
-    if (!user) {
+    const { data: user, error: findError } = await supabase
+      .from("User")
+      .select("*")
+      .eq("id", userId)
+      .single();
+
+    if (findError || !user) {
       return NextResponse.json(
         { error: "User not found" },
         { status: 404 }
@@ -38,10 +43,18 @@ export async function POST(request: NextRequest) {
 
     const hashedPassword = await bcrypt.hash(newPassword, 12);
 
-    await db.user.update({
-      where: { id: userId },
-      data: { password: hashedPassword },
-    });
+    const { error: updateError } = await supabase
+      .from("User")
+      .update({ password: hashedPassword })
+      .eq("id", userId);
+
+    if (updateError) {
+      console.error("Update password error:", updateError);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ message: "Password changed successfully" });
   } catch (error) {

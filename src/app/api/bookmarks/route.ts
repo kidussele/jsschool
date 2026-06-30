@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -13,12 +13,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const bookmarks = await db.bookmark.findMany({
-      where: { userId },
-      orderBy: { createdAt: "desc" },
-    });
+    const { data: bookmarks, error } = await supabase
+      .from("Bookmark")
+      .select("*")
+      .eq("userId", userId)
+      .order("createdAt", { ascending: false });
 
-    return NextResponse.json({ bookmarks });
+    if (error) {
+      console.error("Get bookmarks error:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ bookmarks: bookmarks || [] });
   } catch (error) {
     console.error("Get bookmarks error:", error);
     return NextResponse.json(
@@ -46,9 +55,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const bookmark = await db.bookmark.create({
-      data: { userId, lessonId: lessonId || null, postId: postId || null },
-    });
+    const { data: bookmark, error } = await supabase
+      .from("Bookmark")
+      .insert({
+        userId,
+        lessonId: lessonId || null,
+        postId: postId || null,
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error("Add bookmark error:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ bookmark, message: "Bookmark added" }, { status: 201 });
   } catch (error) {
@@ -71,7 +94,18 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    await db.bookmark.delete({ where: { id: bookmarkId } });
+    const { error } = await supabase
+      .from("Bookmark")
+      .delete()
+      .eq("id", bookmarkId);
+
+    if (error) {
+      console.error("Remove bookmark error:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
 
     return NextResponse.json({ message: "Bookmark removed" });
   } catch (error) {

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/db";
+import { supabase } from "@/lib/supabase";
 
 export async function GET(request: NextRequest) {
   try {
@@ -14,18 +14,27 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const where: Record<string, unknown> = { userId };
-    if (projectId) where.projectId = projectId;
+    let query = supabase
+      .from("ProjectSubmission")
+      .select("*, project:Project(id,title,difficulty)")
+      .eq("userId", userId)
+      .order("submittedAt", { ascending: false });
 
-    const submissions = await db.projectSubmission.findMany({
-      where,
-      orderBy: { submittedAt: "desc" },
-      include: {
-        project: { select: { id: true, title: true, difficulty: true } },
-      },
-    });
+    if (projectId) {
+      query = query.eq("projectId", projectId);
+    }
 
-    return NextResponse.json({ submissions });
+    const { data: submissions, error } = await query;
+
+    if (error) {
+      console.error("Get submissions error:", error);
+      return NextResponse.json(
+        { error: "Internal server error" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ submissions: submissions || [] });
   } catch (error) {
     console.error("Get submissions error:", error);
     return NextResponse.json(
@@ -46,36 +55,44 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const project = await db.project.findUnique({ where: { id: projectId } });
-    if (!project) {
+    const { data: project, error: projErr } = await supabase
+      .from("Project")
+      .select("id,title")
+      .eq("id", projectId)
+      .single();
+
+    if (projErr || !project) {
       return NextResponse.json({ error: "Project not found" }, { status: 404 });
     }
 
-    const submission = await db.projectSubmission.create({
-      data: {
+    const { data: submission, error: subErr } = await supabase
+      .from("ProjectSubmission")
+      .insert({
         userId,
         projectId,
         codeUrl: codeUrl || null,
         screenshotUrl: screenshotUrl || null,
         status: "pending",
-      },
+      })
+      .select()
+      .single();
+
+    if (subErr) {
+      console.error("Create submission error:", subErr);
+      return NextResponse.json({ error: "Failed to submit project" }, { status: 500 });
+    }
+
+    await supabase.from("Notification").insert({
+      userId,
+      type: "general",
+      title: "Project Submitted! 🚀",
+      message: `Your submission for "${project.title}" is pending review.`,
     });
 
-    await db.notification.create({
-      data: {
-        userId,
-        type: "general",
-        title: "Project Submitted! 🚀",
-        message: `Your submission for "${project.title}" is pending review.`,
-      },
-    });
-
-    await db.activityLog.create({
-      data: {
-        userId,
-        action: "project_submitted",
-        details: JSON.stringify({ projectId, projectTitle: project.title }),
-      },
+    await supabase.from("ActivityLog").insert({
+      userId,
+      action: "project_submitted",
+      details: JSON.stringify({ projectId, projectTitle: project.title }),
     });
 
     return NextResponse.json(
